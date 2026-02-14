@@ -1,0 +1,10 @@
+langchain
+langchain-community
+langchain-deepseek
+langgraph
+lxml
+python-dotenv
+chromadb
+onnxruntime
+pandas
+numpy<2.0.0
