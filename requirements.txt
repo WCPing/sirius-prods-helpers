@@ -8,3 +8,6 @@ chromadb
 onnxruntime
 pandas
 numpy<2.0.0
+sqlalchemy
+pymysql
+oracledb

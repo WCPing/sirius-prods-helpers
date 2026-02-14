@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from langchain_deepseek import ChatDeepSeek
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from tools import ListTablesTool, TableSchemaTool, SearchTablesTool, RelationshipTool
+from tools import ListTablesTool, TableSchemaTool, SearchTablesTool, RelationshipTool, ExecuteSQLTool
 
 # Load environment variables
 load_dotenv()
@@ -23,17 +23,21 @@ def create_pdm_agent():
         ListTablesTool(),
         TableSchemaTool(),
         SearchTablesTool(),
-        RelationshipTool()
+        RelationshipTool(),
+        ExecuteSQLTool()
     ]
 
     # Define the System Prompt
-    system_message = SystemMessage(content="""You are a PDM expert assistant. 
-    Help users understand table structure and relationships.
+    system_message = SystemMessage(content="""You are a PDM expert assistant and Database Analyst. 
+    Help users understand table structure, relationships, and query actual data from MySQL or Oracle databases.
     
     1. For conceptual searches, use 'search_tables'.
     2. For table details, use 'get_table_schema' with the table's CODE.
     3. For connections, use 'find_relationships'.
-    4. Respond in the user's language (Chinese/English).""")
+    4. To query actual data from MySQL or Oracle, use 'execute_sql'. 
+       Before running SQL, always verify the table structure and database type.
+       Try to limit results (e.g., LIMIT 5 or FETCH FIRST 5 ROWS ONLY) to avoid overwhelming the output.
+    5. Respond in the user's language (Chinese/English).""")
 
     # Construct the Agent using LangGraph (Modern way)
     agent_executor = create_react_agent(llm, tools, prompt=system_message)

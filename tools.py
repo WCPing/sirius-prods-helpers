@@ -4,6 +4,7 @@ from langchain.tools import BaseTool
 from chromadb import PersistentClient
 from chromadb.utils import embedding_functions
 from typing import Optional, List, Dict, Any
+from db_manager import db_manager
 
 class ListTablesTool(BaseTool):
     name: str = "list_tables"
@@ -127,3 +128,31 @@ class RelationshipTool(BaseTool):
             other = child if parent == table_code else parent
             output += f"- {name}: {table_code} ({direction}) <-> {other}\n"
         return output
+
+class ExecuteSQLTool(BaseTool):
+    name: str = "execute_sql"
+    description: str = "Executes a SQL query on a specific database (mysql or oracle) and returns the results. Input should be a JSON string with 'db_type' and 'sql' keys."
+
+    def _run(self, db_type: str, sql: str):
+        """
+        Runs the SQL query. 
+        Note: The Agent might pass these as separate arguments if configured correctly, 
+        or we can parse a JSON string if needed.
+        """
+        logger_name = "tools.ExecuteSQLTool"
+        import logging
+        logger = logging.getLogger(logger_name)
+        logger.info(f"Executing {db_type} SQL: {sql}")
+        
+        results = db_manager.execute_query(db_type, sql)
+        
+        if isinstance(results, str):
+            return results
+        
+        if not results:
+            return "Query execution successful, but no rows were returned."
+            
+        # Format results as a string for the LLM
+        import pandas as pd
+        df = pd.DataFrame(results)
+        return df.to_string(index=False)
