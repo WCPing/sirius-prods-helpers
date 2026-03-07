@@ -1,6 +1,7 @@
 langchain
 langchain-community
 langchain-deepseek
+langchain-anthropic
 langgraph
 lxml
 python-dotenv

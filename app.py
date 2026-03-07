@@ -1,22 +1,48 @@
 import os
 from dotenv import load_dotenv
 from langchain_deepseek import ChatDeepSeek
-from langgraph.prebuilt import create_react_agent
+from langchain_anthropic import ChatAnthropic
+from langchain.agents import create_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 from tools import ListTablesTool, TableSchemaTool, SearchTablesTool, RelationshipTool, ExecuteSQLTool
 
 # Load environment variables
 load_dotenv()
 
+def create_llm():
+    """Create LLM instance based on LLM_PROVIDER environment variable."""
+    provider = os.getenv("LLM_PROVIDER", "deepseek").lower()
+
+    if provider == "claude":
+        base_url = os.getenv("ANTHROPIC_BASE_URL")
+        auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN")
+        model = os.getenv("CLAUDE_MODEL", "claude-4.6-sonnet")
+
+        if not auth_token:
+            raise ValueError("ANTHROPIC_AUTH_TOKEN is not set in .env")
+
+        print(f"[LLM] Using Claude model: {model}")
+        return ChatAnthropic(
+            model=model,
+            anthropic_api_key=auth_token,
+            anthropic_api_url=base_url,
+            temperature=0.1,
+            max_tokens=2000,
+        )
+    else:
+        # Default: DeepSeek
+        print("[LLM] Using DeepSeek model: deepseek-chat")
+        return ChatDeepSeek(
+            model="deepseek-chat",
+            temperature=0.1,
+            max_tokens=2000,
+            timeout=None,
+            max_retries=2,
+        )
+
 def create_pdm_agent():
     # Initialize LLM
-    llm = ChatDeepSeek(
-        model="deepseek-chat",
-        temperature=0.1,
-        max_tokens=2000,
-        timeout=None,
-        max_retries=2
-    )
+    llm = create_llm()
 
     # Initialize Tools
     tools = [
@@ -40,7 +66,7 @@ def create_pdm_agent():
     5. Respond in the user's language (Chinese/English).""")
 
     # Construct the Agent using LangGraph (Modern way)
-    agent_executor = create_react_agent(llm, tools, prompt=system_message)
+    agent_executor = create_agent(llm, tools, system_prompt=system_message)
     
     return agent_executor
 

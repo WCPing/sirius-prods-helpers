@@ -20,6 +20,10 @@ class PDMIndexer:
         self.pdm_dir = os.getenv("PDM_FILES_DIR", "./files")
         self.model_name = os.getenv("MODEL_NAME", "paraphrase-multilingual-MiniLM-L12-v2")
         
+        # Ensure parent directories exist
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+        os.makedirs(self.chroma_path, exist_ok=True)
+
         # Initialize SQLite
         self.conn = sqlite3.connect(self.db_path)
         self._init_sqlite()
