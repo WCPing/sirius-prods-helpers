@@ -1,11 +1,33 @@
+"""
+app.py
+
+PDM Assistant CLI 交互主程序入口。
+
+核心逻辑已迁移至 backend/ 目录，此文件负责命令行交互界面。
+
+启动方式：
+    python app.py            # 启动 CLI 模式
+
+启动 API 服务：
+    uvicorn backend.api.main:app --reload --host 127.0.0.1 --port 8000
+"""
+
 import os
 from dotenv import load_dotenv
 from langchain_deepseek import ChatDeepSeek
 from langchain_anthropic import ChatAnthropic
 from langchain.agents import create_agent
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from tools import ListTablesTool, TableSchemaTool, SearchTablesTool, RelationshipTool, ExecuteSQLTool
-from conversation_manager import ConversationManager
+
+# 从 backend.core 导入核心模块
+from backend.core.tools import (
+    ListTablesTool,
+    TableSchemaTool,
+    SearchTablesTool,
+    RelationshipTool,
+    ExecuteSQLTool,
+)
+from backend.core.conversation_manager import ConversationManager
 
 # Load environment variables
 load_dotenv()
