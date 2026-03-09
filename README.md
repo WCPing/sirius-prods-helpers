@@ -49,7 +49,8 @@ sirius-prods-helpers-test1/
 │           └── MessageInput.vue    # 底部输入框
 │
 ├── app.py                          # CLI 命令行入口
-├── run_api.py                      # API 服务快捷启动脚本
+├── run_api.py                      # 仅启动后端 API 服务（配合接口测试使用）
+├── run_app.py                      # 前后台一键启动脚本（后端 API + 前台 Web）
 ├── files/                          # 存放 .pdm 文件
 ├── data/                           # SQLite 元数据 & Chroma 向量库
 ├── requirements.txt                # Python 依赖
@@ -161,22 +162,34 @@ python app.py
 
 ### 方式二：API + 前端 Web 界面（推荐）
 
-**步骤 1**：启动后端 API 服务（端口由 `.env` 的 `API_PORT` 控制，默认 `8001`）
+提供两种启动脚本，按需选择：
+
+| 脚本 | 用途 |
+|------|------|
+| `python run_api.py` | 仅启动后端 API，适合配合 `test_api.sh` 做接口测试 |
+| `python run_app.py` | 前后台一键启动，日常开发推荐 |
+
+**▸ 仅启动后端（接口调试）**
 
 ```bash
-# 激活虚拟环境
 source .venv/bin/activate
-
-# 启动后端
 python run_api.py
 ```
 
+**▸ 前后台一键启动（日常开发）**
+
+```bash
+source .venv/bin/activate
+python run_app.py
+```
+
 启动后访问：
+- **前台 Web 界面**：http://localhost:5173
 - **Swagger UI 文档**：http://localhost:8001/docs
 - **ReDoc 文档**：http://localhost:8001/redoc
 - **健康检查**：http://localhost:8001/health
 
-**步骤 2**：启动前端开发服务器
+> 如需单独手动启动前台：
 
 ```bash
 cd frontend
