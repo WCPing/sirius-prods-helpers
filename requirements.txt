@@ -28,3 +28,8 @@ oracledb
 fastapi
 uvicorn[standard]
 pydantic
+
+# 代码解析 & Git 操作
+javalang
+pyyaml
+gitpython

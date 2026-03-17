@@ -1,6 +1,6 @@
-# PDM 智能助手 (LangChain + FastAPI + Vue3)
+# 统一知识中枢助手 (LangChain + FastAPI + Vue3)
 
-一个专门用于解析、索引和查询 PowerDesigner 物理数据模型 (.pdm) 文件的智能助手，支持 **CLI 命令行**、**RESTful API** 和 **Web 前端界面** 三种交互方式。
+一个集成 **PDM 数据模型**、**代码仓库** 和 **数据库** 的智能问答与链路追踪助手。支持 PDM 文件解析、Java/Spring Boot 代码索引、MyBatis XML 解析、前端模板(hbs/jQuery)分析，以及跨层调用链追踪（Config → Controller → Service → Mapper → Table）。提供 **CLI 命令行**、**RESTful API** 和 **Web 前端界面** 三种交互方式。
 
 ---
 
@@ -12,9 +12,14 @@ sirius-prods-helpers-test1/
 ├── backend/                        # 后端核心代码
 │   ├── core/                       # 核心业务逻辑
 │   │   ├── parser.py               # PDM XML 解析器
-│   │   ├── indexer.py              # SQLite + ChromaDB 索引器
+│   │   ├── indexer.py              # SQLite + ChromaDB 索引器（PDM）
+│   │   ├── unified_indexer.py      # 统一索引器（PDM + 代码 + 配置）
+│   │   ├── source_manager.py       # 知识源管理器（注册/同步/删除）
+│   │   ├── code_parser.py          # 代码解析器（Java/XML/hbs/JS）
 │   │   ├── db_manager.py           # MySQL / Oracle 连接管理
-│   │   ├── tools.py                # LangChain Agent 工具集
+│   │   ├── tools.py                # PDM / 数据库 Agent 工具集
+│   │   ├── code_tools.py           # 代码搜索 Agent 工具集
+│   │   ├── trace_tools.py          # 链路追踪 Agent 工具集
 │   │   └── conversation_manager.py # 多轮对话会话管理
 │   ├── api/                        # FastAPI 接口层
 │   │   ├── main.py                 # FastAPI 应用主入口
@@ -52,7 +57,7 @@ sirius-prods-helpers-test1/
 ├── run_api.py                      # 仅启动后端 API 服务（配合接口测试使用）
 ├── run_app.py                      # 前后台一键启动脚本（后端 API + 前台 Web）
 ├── files/                          # 存放 .pdm 文件
-├── data/                           # SQLite 元数据 & Chroma 向量库
+├── data/                           # SQLite 元数据 & Chroma 向量库 & Git 克隆仓库
 ├── requirements.txt                # Python 依赖
 ├── .env                            # 环境变量（勿提交）
 └── .env_sample                     # 环境变量模板
@@ -65,7 +70,8 @@ sirius-prods-helpers-test1/
 | 层级 | 技术 |
 |------|------|
 | **AI / 后端** | Python 3.10+、FastAPI、LangChain、DeepSeek / Claude |
-| **数据存储** | SQLite（元数据）、ChromaDB（向量检索）、MySQL / Oracle（业务库） |
+| **数据存储** | SQLite（元数据 + 代码索引）、ChromaDB（向量检索）、MySQL / Oracle（业务库） |
+| **代码解析** | javalang（Java AST）、lxml（XML/MyBatis）、GitPython（仓库同步） |
 | **前端** | Vue 3、Vite、Element Plus、Pinia、Axios |
 
 ---
@@ -118,6 +124,10 @@ cp .env_sample .env
 | `MAX_MESSAGES_PER_SESSION` | 每个会话最大消息数 | `50` |
 | `MYSQL_URL` | MySQL 连接串 | - |
 | `ORACLE_URL` | Oracle 连接串 | - |
+| `REPOS_DIR` | Git 克隆仓库存放目录 | `./data/repos` |
+| `CODE_CHUNK_MAX_LINES` | 代码片段最大行数 | `100` |
+| `CODE_INDEX_EXTENSIONS` | 索引的文件扩展名（逗号分隔） | `.java,.js,.hbs,.xml,.yml,.yaml,.properties` |
+| `LOCAL_CODE_DIR` | 本地 Java 项目路径（用于代码索引） | - |
 
 ### 4. 索引 PDM 文件
 
@@ -127,7 +137,27 @@ cp .env_sample .env
 python indexer.py
 ```
 
-### 5. 安装前端依赖
+### 5. 索引代码仓库
+
+先在 `.env` 中配置 `LOCAL_CODE_DIR` 为你的 Java 项目路径，然后执行：
+
+```bash
+# 首次索引（增量模式，自动跳过未变化的文件）
+python scripts/index_code.py
+
+# 或手动指定路径（不依赖 .env）
+python scripts/index_code.py --path /your/java/project/path
+
+# 全量重建索引（清除旧数据后重新索引）
+python scripts/index_code.py --reindex
+
+# 查看已注册的知识源列表
+python scripts/index_code.py --list
+```
+
+> **说明**：索引脚本支持增量更新，通过文件 MD5 自动跳过未变化的文件。日常使用直接运行 `python scripts/index_code.py` 即可，仅处理新增和修改的文件。
+
+### 6. 安装前端依赖
 
 ```bash
 cd frontend
@@ -284,6 +314,8 @@ curl -X POST "http://localhost:8001/api/conversations/${SESSION}/messages" \
 
 ## Agent 工具集
 
+### PDM / 数据库工具
+
 | 工具 | 说明 |
 |------|------|
 | `list_tables` | 列出 PDM 中所有的表 |
@@ -291,6 +323,62 @@ curl -X POST "http://localhost:8001/api/conversations/${SESSION}/messages" \
 | `get_table_schema` | 获取指定表的详细字段信息 |
 | `find_relationships` | 追踪外键关联关系 |
 | `execute_sql` | 在 MySQL / Oracle 上直接执行 SQL 查询 |
+
+### 代码搜索工具
+
+| 工具 | 说明 |
+|------|------|
+| `search_code` | 语义搜索代码片段（类、方法、模板等） |
+| `get_code_structure` | 获取文件的代码结构（类/方法/字段列表） |
+| `get_class_detail` | 获取指定类的详细信息（注解、方法、字段） |
+| `search_api_endpoints` | 搜索 Spring REST API 端点 |
+
+### 链路追踪工具
+
+| 工具 | 说明 |
+|------|------|
+| `trace_component` | 追踪组件完整调用链（Config → Controller → Service → Mapper → Table） |
+| `find_config_usage` | 查找引用指定配置键的所有代码位置 |
+| `find_table_usage` | 查找引用指定数据库表的所有代码（MyBatis/注解等） |
+
+---
+
+## 知识源管理
+
+系统支持三种类型的知识源：
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| `pdm` | PowerDesigner 数据模型文件 | `./files/` 目录下的 `.pdm` 文件 |
+| `git` | Git 远程仓库（自动 clone/pull） | Java/Spring Boot 项目的 Git URL |
+| `local` | 本地代码目录 | 本地磁盘上的 Java 项目路径 |
+
+### 代码索引支持的文件类型
+
+| 文件类型 | 解析策略 |
+|----------|---------|
+| `.java` | javalang AST 解析，提取包/类/方法/字段/注解/Spring 路径映射 |
+| `.xml` | MyBatis Mapper XML → 提取 SQL 语句及引用的表名；pom.xml → 依赖信息 |
+| `.hbs` | Handlebars 模板 → partial 引用、表单 action、模板变量 |
+| `.js` | jQuery/JS → AJAX API 调用、函数定义、DOM 事件绑定 |
+| `.yml/.yaml/.properties` | 配置文件（文件级索引） |
+
+### 通过代码注册知识源
+
+```python
+from backend.core.source_manager import source_manager
+from backend.core.unified_indexer import unified_indexer
+
+# 注册一个本地 Java 项目
+source_id = source_manager.register_source(
+    name="My Java Project",
+    source_type="local",
+    location="/path/to/java/project",
+)
+
+# 触发索引
+unified_indexer.index_source(source_id)
+```
 
 ---
 

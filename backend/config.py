@@ -53,6 +53,24 @@ class Settings:
     MYSQL_URL: str = os.getenv("MYSQL_URL", "")
     ORACLE_URL: str = os.getenv("ORACLE_URL", "")
 
+    # ---------------------------------------------------------------
+    # 知识源配置
+    # ---------------------------------------------------------------
+    REPOS_DIR: str = os.getenv("REPOS_DIR", "./data/repos")
+
+    # ---------------------------------------------------------------
+    # 代码索引配置
+    # ---------------------------------------------------------------
+    CODE_CHUNK_MAX_LINES: int = int(os.getenv("CODE_CHUNK_MAX_LINES", "100"))
+    CODE_INDEX_EXTENSIONS: list = os.getenv(
+        "CODE_INDEX_EXTENSIONS",
+        ".java,.js,.hbs,.xml,.yml,.yaml,.properties"
+    ).split(",")
+    CODE_EXCLUDE_DIRS: list = os.getenv(
+        "CODE_EXCLUDE_DIRS",
+        "target,build,dist,node_modules,.git,.svn,test,tests,__pycache__"
+    ).split(",")
+
 
 # 单例配置对象
 settings = Settings()

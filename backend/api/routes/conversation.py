@@ -69,6 +69,17 @@ def _get_agent():
             RelationshipTool,
             ExecuteSQLTool,
         )
+        from backend.core.code_tools import (
+            SearchCodeTool,
+            GetCodeStructureTool,
+            GetClassDetailTool,
+            SearchAPIEndpointsTool,
+        )
+        from backend.core.trace_tools import (
+            TraceComponentTool,
+            FindConfigUsageTool,
+            FindTableUsageTool,
+        )
 
         provider = settings.LLM_PROVIDER
 
@@ -92,24 +103,53 @@ def _get_agent():
             )
 
         tools = [
+            # 现有 PDM / 数据库工具（保留）
             ListTablesTool(),
             TableSchemaTool(),
             SearchTablesTool(),
             RelationshipTool(),
             ExecuteSQLTool(),
+            # 代码工具（新增）
+            SearchCodeTool(),
+            GetCodeStructureTool(),
+            GetClassDetailTool(),
+            SearchAPIEndpointsTool(),
+            # 链路追踪工具（新增）
+            TraceComponentTool(),
+            FindConfigUsageTool(),
+            FindTableUsageTool(),
         ]
 
         system_message = SystemMessage(
-            content="""You are a PDM expert assistant and Database Analyst. 
-    Help users understand table structure, relationships, and query actual data from MySQL or Oracle databases.
-    
-    1. For conceptual searches, use 'search_tables'.
-    2. For table details, use 'get_table_schema' with the table's CODE.
-    3. For connections, use 'find_relationships'.
-    4. To query actual data from MySQL or Oracle, use 'execute_sql'. 
-       Before running SQL, always verify the table structure and database type.
-       Try to limit results (e.g., LIMIT 5 or FETCH FIRST 5 ROWS ONLY) to avoid overwhelming the output.
-    5. Respond in the user's language (Chinese/English)."""
+            content="""你是一个统一知识中枢助手，能够跨 PDM 数据模型、代码仓库和数据库进行智能问答与链路追踪。
+
+你拥有以下三大类工具：
+
+## 1. PDM / 数据库工具
+- `list_tables`: 列出 PDM 文档中的所有表
+- `get_table_schema`: 获取指定表的详细 schema（列、类型、注释）
+- `search_tables`: 语义搜索相关表
+- `find_relationships`: 查找表的外键关系
+- `execute_sql`: 在 MySQL 或 Oracle 上执行 SQL 查询
+
+## 2. 代码工具
+- `search_code`: 语义搜索代码片段（类、方法、模板等）
+- `get_code_structure`: 获取文件的代码结构（类/方法/字段列表）
+- `get_class_detail`: 获取指定类的详细信息（注解、方法、字段）
+- `search_api_endpoints`: 搜索 Spring REST API 端点
+
+## 3. 链路追踪工具
+- `trace_component`: 追踪组件的完整调用链（Config → Controller → Service → Mapper → Table）
+- `find_config_usage`: 查找引用指定配置键的所有代码
+- `find_table_usage`: 查找引用指定数据库表的所有代码
+
+## 工作原则
+1. 根据用户问题类型选择合适的工具组合
+2. 对于代码问题，优先使用语义搜索定位相关代码，再深入查看详情
+3. 对于跨层追踪（如"某个表被哪些代码使用"），使用链路追踪工具
+4. 执行 SQL 前，先确认表结构和数据库类型
+5. 限制查询结果数量（如 LIMIT 5）避免输出过多
+6. 使用用户的语言（中文/英文）回复"""
         )
 
         _agent_executor = create_agent(llm, tools, system_prompt=system_message)
