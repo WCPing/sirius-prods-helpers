@@ -47,6 +47,9 @@ class Settings:
     ANTHROPIC_BASE_URL: str = os.getenv("ANTHROPIC_BASE_URL", "")
     CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-4.6-sonnet")
 
+    # LLM 请求超时（秒），默认 120 秒
+    LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "120"))
+
     # ---------------------------------------------------------------
     # 数据库连接配置
     # ---------------------------------------------------------------
@@ -57,6 +60,11 @@ class Settings:
     # 知识源配置
     # ---------------------------------------------------------------
     REPOS_DIR: str = os.getenv("REPOS_DIR", "./data/repos")
+
+    # ---------------------------------------------------------------
+    # 嵌入模型配置
+    # ---------------------------------------------------------------
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "paraphrase-multilingual-MiniLM-L12-v2")
 
     # ---------------------------------------------------------------
     # 代码索引配置

@@ -30,20 +30,22 @@ class PDMIndexer:
         
         # Initialize Chroma
         self.chroma_client = chromadb.PersistentClient(path=self.chroma_path)
-        # Use built-in ONNX model (very lightweight, no API key, no PyTorch)
-        self.embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        # Use multilingual model for Chinese support
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=self.model_name
+        )
         
         try:
             self.collection = self.chroma_client.get_or_create_collection(
-                name="pdm_metadata", 
+                name="pdm_metadata",
                 embedding_function=self.embedding_fn
             )
         except ValueError as e:
-            if "already exists" in str(e):
-                logger.info("Embedding function conflict detected. Recreating collection for ONNX...")
+            if "conflict" in str(e).lower() or "already exists" in str(e):
+                logger.info("Embedding function conflict detected. Recreating pdm_metadata collection...")
                 self.chroma_client.delete_collection("pdm_metadata")
                 self.collection = self.chroma_client.create_collection(
-                    name="pdm_metadata", 
+                    name="pdm_metadata",
                     embedding_function=self.embedding_fn
                 )
             else:

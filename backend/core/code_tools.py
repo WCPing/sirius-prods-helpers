@@ -17,6 +17,13 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _get_embedding_fn():
+    """统一的嵌入函数工厂，使用多语言模型。"""
+    return embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=settings.MODEL_NAME
+    )
+
+
 class SearchCodeTool(BaseTool):
     name: str = "search_code"
     description: str = (
@@ -26,7 +33,7 @@ class SearchCodeTool(BaseTool):
 
     def _run(self, query: str) -> str:
         chroma_path = settings.CHROMA_DB_PATH
-        embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        embedding_fn = _get_embedding_fn()
 
         client = PersistentClient(path=chroma_path)
         try:
@@ -192,3 +199,115 @@ class SearchAPIEndpointsTool(BaseTool):
                 output += "\n"
 
         return output or f"No API endpoints with paths found matching '{keyword}'."
+
+
+class GrepCodeTool(BaseTool):
+    name: str = "grep_code"
+    description: str = (
+        "在索引的代码内容中精确搜索关键词（类似 grep）。"
+        "适用于搜索精确的类名、函数名、CSS class、icon 名、变量名等。"
+        "输入要搜索的关键词字符串。"
+    )
+
+    def _run(self, keyword: str) -> str:
+        db_path = settings.SQLITE_DB_PATH
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 1) 先在 SQLite content 中搜索（快速路径）
+        cursor.execute("""
+            SELECT file_path, chunk_type, name, content, line_start, line_end
+            FROM code_chunks
+            WHERE content LIKE ?
+            LIMIT 10
+        """, (f"%{keyword}%",))
+
+        rows = cursor.fetchall()
+
+        # 2) 如果 SQLite 没找到，回退到源文件搜索（处理 content 截断问题）
+        if not rows:
+            rows = self._grep_source_files(cursor, keyword)
+
+        conn.close()
+
+        if not rows:
+            return f"No code found containing '{keyword}'."
+
+        output = f"Grep results for '{keyword}' (up to 10 matches):\n\n"
+        for i, (file_path, chunk_type, name, content, line_start, line_end) in enumerate(rows, 1):
+            output += f"--- Match {i} ---\n"
+            output += f"File: {file_path} (lines {line_start}-{line_end})\n"
+            output += f"Type: {chunk_type} | Name: {name}\n"
+
+            # Show context around the keyword match
+            lines = content.splitlines()
+            matched_lines = []
+            for j, line in enumerate(lines):
+                if keyword.lower() in line.lower():
+                    start = max(0, j - 1)
+                    end = min(len(lines), j + 2)
+                    for k in range(start, end):
+                        prefix = ">>>" if k == j else "   "
+                        matched_lines.append(f"  {prefix} L{line_start + k}: {lines[k][:200]}")
+                    matched_lines.append("")
+                    if len(matched_lines) > 15:
+                        break
+
+            if matched_lines:
+                output += "Context:\n" + "\n".join(matched_lines) + "\n"
+            else:
+                output += f"Content (truncated): {content[:300]}\n"
+
+            output += "\n"
+
+        return output
+
+    def _grep_source_files(self, cursor, keyword: str) -> list:
+        """回退搜索：在源文件中搜索关键词（处理 SQLite content 被截断的情况）。"""
+        # 获取知识源的 location（代码根目录）
+        cursor.execute("SELECT id, location FROM knowledge_sources WHERE source_type IN ('git', 'local')")
+        sources = cursor.fetchall()
+
+        results = []
+        for source_id, code_dir in sources:
+            if not os.path.isdir(code_dir):
+                continue
+
+            # 获取该知识源的所有已索引文件路径
+            cursor.execute(
+                "SELECT rel_path FROM indexed_files WHERE source_id = ?",
+                (source_id,),
+            )
+            indexed_paths = [row[0] for row in cursor.fetchall()]
+
+            for rel_path in indexed_paths:
+                abs_path = os.path.join(code_dir, rel_path)
+                if not os.path.isfile(abs_path):
+                    continue
+                try:
+                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                    for line_no, line in enumerate(lines, 1):
+                        if keyword in line:
+                            # 提取匹配行周围的上下文
+                            start = max(0, line_no - 3)
+                            end = min(len(lines), line_no + 2)
+                            context = "".join(lines[start:end])
+                            results.append((
+                                rel_path,
+                                "file_grep",
+                                os.path.basename(rel_path),
+                                context,
+                                start + 1,
+                                end,
+                            ))
+                            break  # 每个文件只取第一个匹配
+                except Exception:
+                    continue
+
+                if len(results) >= 10:
+                    break
+            if len(results) >= 10:
+                break
+
+        return results

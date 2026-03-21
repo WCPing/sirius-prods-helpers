@@ -11,22 +11,47 @@ API 文档：
     ReDoc      : http://localhost:8000/redoc
 """
 
+import os
 import logging
+from datetime import datetime
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import pdm, conversation
+from backend.api.routes import pdm, conversation, knowledge
 from backend.config import settings
 
 # ---------------------------------------------------------------
-# 日志配置
+# 统一日志配置（全局唯一入口，其他模块只需 logging.getLogger(__name__)）
 # ---------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+_formatter = logging.Formatter(LOG_FORMAT)
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+
+# 控制台输出
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_formatter)
+_root_logger.addHandler(_console_handler)
+
+# 文件输出：启动时按时间戳生成日志文件，如 app_20260319_140000.log
+_log_filename = f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+_file_handler = logging.FileHandler(
+    filename=os.path.join(LOG_DIR, _log_filename),
+    encoding="utf-8",
 )
+_file_handler.setFormatter(_formatter)
+_root_logger.addHandler(_file_handler)
+
+# 对第三方库降噪，避免刷屏
+logging.getLogger("chromadb").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,39 +62,40 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """应用启动/关闭钩子"""
     logger.info("=" * 60)
-    logger.info("  PDM Assistant API 服务已启动")
+    logger.info("  知识中枢助手 API 服务已启动")
     logger.info(f"  LLM Provider : {settings.LLM_PROVIDER}")
     logger.info(f"  SQLite DB    : {settings.SQLITE_DB_PATH}")
     logger.info(f"  Chroma DB    : {settings.CHROMA_DB_PATH}")
     logger.info(f"  API Docs     : http://{settings.API_HOST}:{settings.API_PORT}/docs")
     logger.info("=" * 60)
     yield
-    logger.info("PDM Assistant API 服务已关闭")
+    logger.info("知识中枢助手 API 服务已关闭")
 
 
 # ---------------------------------------------------------------
 # FastAPI 应用实例
 # ---------------------------------------------------------------
 app = FastAPI(
-    title="PDM Assistant API",
+    title="知识中枢助手 API",
     description="""
-## PDM 智能助手 - RESTful API
+## 知识中枢助手 - RESTful API
 
-基于 LangChain + FastAPI 构建的 PDM（PowerDesigner 物理数据模型）智能查询服务。
+基于 LangChain + FastAPI 构建的统一知识中枢智能查询服务，支持 PDM 数据模型、代码仓库、配置文件的跨域智能问答与链路追踪。
 
 ### 功能模块
 
 - **PDM 查询** (`/api/pdm/`): 列表、详情、语义搜索、关系查询、SQL 执行
 - **会话管理** (`/api/conversations/`): 创建、查询、对话、删除会话
+- **知识源管理** (`/api/knowledge-sources/`): 注册、同步、索引、统计知识源
 
 ### 快速开始
 
-1. 确保已通过 `python indexer.py` 索引 PDM 文件
+1. 确保已通过 `python scripts/index_code.py` 索引代码文件
 2. 在 `.env` 中配置好 LLM API Key
-3. 调用 `/api/pdm/tables` 查看已索引的表
+3. 调用 `/api/knowledge-sources` 查看已注册的知识源
 4. 调用 `/api/conversations` 创建会话并开始 AI 对话
 """,
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -102,6 +128,7 @@ API_PREFIX = "/api"
 
 app.include_router(pdm.router, prefix=API_PREFIX)
 app.include_router(conversation.router, prefix=API_PREFIX)
+app.include_router(knowledge.router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------
@@ -110,8 +137,8 @@ app.include_router(conversation.router, prefix=API_PREFIX)
 @app.get("/", tags=["系统"], summary="服务状态")
 def root():
     return {
-        "name": "PDM Assistant API",
-        "version": "1.0.0",
+        "name": "知识中枢助手 API",
+        "version": "2.0.0",
         "status": "running",
         "docs": "/docs",
         "redoc": "/redoc",

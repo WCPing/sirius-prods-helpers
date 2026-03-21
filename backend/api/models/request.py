@@ -70,3 +70,28 @@ class SendMessageRequest(BaseModel):
             }
         }
     }
+
+
+# ---------------------------------------------------------------
+# 知识源管理请求模型
+# ---------------------------------------------------------------
+
+class RegisterSourceRequest(BaseModel):
+    """注册知识源请求体"""
+    name: str = Field(..., description="知识源名称", min_length=1)
+    source_type: str = Field(..., description="知识源类型：'pdm'、'git' 或 'local'")
+    location: str = Field(..., description="知识源位置：Git URL 或本地路径", min_length=1)
+    branch: str = Field(default="main", description="Git 分支（仅 git 类型有效）")
+    include_patterns: str = Field(default="", description="文件匹配模式（逗号分隔）")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "Sirius Backend",
+                "source_type": "local",
+                "location": "/path/to/project",
+                "branch": "main",
+                "include_patterns": ""
+            }
+        }
+    }

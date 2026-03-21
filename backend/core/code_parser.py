@@ -481,7 +481,7 @@ class CodeParser:
             language="handlebars",
             name=os.path.basename(rel_path),
             qualified_name=rel_path,
-            content=source[:3000],
+            content=source[:5000],
             summary=f"HBS template: {rel_path} (partials: {len(partials)}, variables: {len(variables)})",
             metadata={
                 "partials": list(set(partials)),
@@ -533,7 +533,7 @@ class CodeParser:
             language="javascript",
             name=os.path.basename(rel_path),
             qualified_name=rel_path,
-            content=source[:3000],
+            content=source[:5000],
             summary=f"JS file: {rel_path} (API calls: {len(api_calls)})",
             metadata={
                 "api_calls": api_calls,

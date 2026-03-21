@@ -174,6 +174,11 @@ export const useConversationStore = defineStore('conversation', () => {
       await _refreshCurrentSessionInList()
     } catch (e) {
       console.error('_sendNormal error:', e)
+      // 区分超时错误和其他错误
+      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
+        ElMessage.error('AI 响应超时，您的消息已保存，刷新页面后可看到。请稍后重试。')
+      }
+      // 其他错误由响应拦截器统一展示，无需重复提示
     } finally {
       sending.value = false
     }

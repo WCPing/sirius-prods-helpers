@@ -156,3 +156,40 @@ class ChatResponse(BaseResponse):
     """AI 对话响应"""
     session_id: str = Field(..., description="会话 ID")
     reply: str = Field(..., description="AI 回复内容")
+
+
+# ---------------------------------------------------------------
+# 知识源管理响应模型
+# ---------------------------------------------------------------
+
+class SourceInfo(BaseModel):
+    """知识源信息"""
+    id: str = Field(..., description="知识源 ID")
+    name: str = Field(..., description="知识源名称")
+    source_type: str = Field(..., description="知识源类型")
+    location: str = Field(..., description="知识源位置")
+    branch: str = Field(default="main", description="分支")
+    include_patterns: str = Field(default="", description="匹配模式")
+    status: str = Field(default="registered", description="状态")
+    created_at: str = Field(default="", description="创建时间")
+    updated_at: str = Field(default="", description="更新时间")
+
+
+class SourceListResponse(BaseResponse):
+    """知识源列表响应"""
+    data: List[SourceInfo] = Field(default_factory=list, description="知识源列表")
+    total: int = Field(default=0, description="总数量")
+
+
+class SourceDetailResponse(BaseResponse):
+    """知识源详情响应"""
+    data: Optional[SourceInfo] = Field(default=None, description="知识源信息")
+
+
+class SourceStatsResponse(BaseResponse):
+    """知识源索引统计响应"""
+    source_id: str = Field(..., description="知识源 ID")
+    code_chunks: int = Field(default=0, description="代码片段数量")
+    config_entries: int = Field(default=0, description="配置项数量")
+    cross_references: int = Field(default=0, description="交叉引用数量")
+    indexed_files: int = Field(default=0, description="已索引文件数量")

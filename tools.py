@@ -1,10 +1,13 @@
 import os
+import logging
 import sqlite3
 from langchain.tools import BaseTool
 from chromadb import PersistentClient
 from chromadb.utils import embedding_functions
 from typing import Optional, List, Dict, Any
 from db_manager import db_manager
+
+logger = logging.getLogger(__name__)
 
 class ListTablesTool(BaseTool):
     name: str = "list_tables"
@@ -139,9 +142,6 @@ class ExecuteSQLTool(BaseTool):
         Note: The Agent might pass these as separate arguments if configured correctly, 
         or we can parse a JSON string if needed.
         """
-        logger_name = "tools.ExecuteSQLTool"
-        import logging
-        logger = logging.getLogger(logger_name)
         logger.info(f"Executing {db_type} SQL: {sql}")
         
         results = db_manager.execute_query(db_type, sql)

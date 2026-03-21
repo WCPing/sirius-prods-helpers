@@ -6,6 +6,7 @@ from chromadb import PersistentClient
 from chromadb.utils import embedding_functions
 from typing import Optional, List, Dict, Any
 from .db_manager import db_manager
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +74,18 @@ class SearchTablesTool(BaseTool):
     description: str = "Performs a semantic search to find relevant tables based on a conceptual query (e.g., 'user info', 'orders')."
 
     def _run(self, query: str):
-        chroma_path = os.getenv("CHROMA_DB_PATH", "./data/chroma_db")
-        # Use built-in ONNX model (matching the indexer)
-        embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        chroma_path = settings.CHROMA_DB_PATH
+        # Use multilingual model (matching the indexer)
+        embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=settings.MODEL_NAME
+        )
         
         client = PersistentClient(path=chroma_path)
-        collection = client.get_collection(name="pdm_metadata", embedding_function=embedding_fn)
-        
+        try:
+            collection = client.get_collection(name="pdm_metadata", embedding_function=embedding_fn)
+        except Exception:
+            return "PDM index not found. Please run the PDM indexer first."
+
         results = collection.query(
             query_texts=[query],
             n_results=5,

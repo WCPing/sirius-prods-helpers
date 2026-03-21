@@ -16,16 +16,19 @@ sirius-prods-helpers-test1/
 │   │   ├── unified_indexer.py      # 统一索引器（PDM + 代码 + 配置）
 │   │   ├── source_manager.py       # 知识源管理器（注册/同步/删除）
 │   │   ├── code_parser.py          # 代码解析器（Java/XML/hbs/JS）
+│   │   ├── config_parser.py        # 配置解析器（yml/properties/pom.xml）
 │   │   ├── db_manager.py           # MySQL / Oracle 连接管理
 │   │   ├── tools.py                # PDM / 数据库 Agent 工具集
-│   │   ├── code_tools.py           # 代码搜索 Agent 工具集
+│   │   ├── code_tools.py           # 代码搜索 Agent 工具集（含 GrepCodeTool）
+│   │   ├── config_tools.py         # 配置查询 Agent 工具集
 │   │   ├── trace_tools.py          # 链路追踪 Agent 工具集
 │   │   └── conversation_manager.py # 多轮对话会话管理
 │   ├── api/                        # FastAPI 接口层
 │   │   ├── main.py                 # FastAPI 应用主入口
 │   │   ├── routes/
 │   │   │   ├── pdm.py              # PDM 查询相关接口
-│   │   │   └── conversation.py     # 会话管理接口
+│   │   │   ├── conversation.py     # 会话管理接口
+│   │   │   └── knowledge.py        # 知识源管理接口
 │   │   └── models/
 │   │       ├── request.py          # Pydantic 请求模型
 │   │       └── response.py         # Pydantic 响应模型
@@ -70,8 +73,9 @@ sirius-prods-helpers-test1/
 | 层级 | 技术 |
 |------|------|
 | **AI / 后端** | Python 3.10+、FastAPI、LangChain、DeepSeek / Claude |
-| **数据存储** | SQLite（元数据 + 代码索引）、ChromaDB（向量检索）、MySQL / Oracle（业务库） |
-| **代码解析** | javalang（Java AST）、lxml（XML/MyBatis）、GitPython（仓库同步） |
+| **向量嵌入** | sentence-transformers (`paraphrase-multilingual-MiniLM-L12-v2`，支持中英文) |
+| **数据存储** | SQLite（元数据 + 代码索引 + 配置索引）、ChromaDB（向量检索）、MySQL / Oracle（业务库） |
+| **代码解析** | javalang（Java AST）、lxml（XML/MyBatis）、pyyaml（YAML 配置）、GitPython（仓库同步） |
 | **前端** | Vue 3、Vite、Element Plus、Pinia、Axios |
 
 ---
@@ -128,6 +132,7 @@ cp .env_sample .env
 | `CODE_CHUNK_MAX_LINES` | 代码片段最大行数 | `100` |
 | `CODE_INDEX_EXTENSIONS` | 索引的文件扩展名（逗号分隔） | `.java,.js,.hbs,.xml,.yml,.yaml,.properties` |
 | `LOCAL_CODE_DIR` | 本地 Java 项目路径（用于代码索引） | - |
+| `MODEL_NAME` | 嵌入模型名称 | `paraphrase-multilingual-MiniLM-L12-v2` |
 
 ### 4. 索引 PDM 文件
 
@@ -329,9 +334,17 @@ curl -X POST "http://localhost:8001/api/conversations/${SESSION}/messages" \
 | 工具 | 说明 |
 |------|------|
 | `search_code` | 语义搜索代码片段（类、方法、模板等） |
+| `grep_code` | 精确关键词搜索（类似 grep，支持 icon 名、CSS class、变量名等） |
 | `get_code_structure` | 获取文件的代码结构（类/方法/字段列表） |
 | `get_class_detail` | 获取指定类的详细信息（注解、方法、字段） |
 | `search_api_endpoints` | 搜索 Spring REST API 端点 |
+
+### 配置查询工具
+
+| 工具 | 说明 |
+|------|------|
+| `config_lookup` | 配置项查找（先精确匹配 key，再语义搜索） |
+| `list_configs` | 按知识源/文件/profile 聚合查看配置文件概览 |
 
 ### 链路追踪工具
 
@@ -361,7 +374,8 @@ curl -X POST "http://localhost:8001/api/conversations/${SESSION}/messages" \
 | `.xml` | MyBatis Mapper XML → 提取 SQL 语句及引用的表名；pom.xml → 依赖信息 |
 | `.hbs` | Handlebars 模板 → partial 引用、表单 action、模板变量 |
 | `.js` | jQuery/JS → AJAX API 调用、函数定义、DOM 事件绑定 |
-| `.yml/.yaml/.properties` | 配置文件（文件级索引） |
+| `.yml/.yaml` | Spring Boot 配置 → 递归扁平化 key-value（如 `spring.datasource.url`），自动识别 profile |
+| `.properties` | Java properties → key=value 解析，支持注释提取 |
 
 ### 通过代码注册知识源
 
@@ -382,8 +396,84 @@ unified_indexer.index_source(source_id)
 
 ---
 
+## 知识源管理 API `/api/knowledge-sources/`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/knowledge-sources` | 注册知识源 |
+| `GET` | `/api/knowledge-sources` | 列出所有知识源 |
+| `GET` | `/api/knowledge-sources/{id}` | 知识源详情（含索引统计） |
+| `DELETE` | `/api/knowledge-sources/{id}` | 删除知识源及其索引数据 |
+| `POST` | `/api/knowledge-sources/{id}/index` | 触发后台索引（全量重建） |
+| `POST` | `/api/knowledge-sources/{id}/sync` | 同步代码（Git pull / 验证路径） |
+| `GET` | `/api/knowledge-sources/{id}/stats` | 索引统计（chunks / configs / cross-refs / files） |
+
+**示例：注册并索引本地项目**
+
+```bash
+# 1. 注册知识源
+curl -X POST http://localhost:8001/api/knowledge-sources \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-project", "source_type": "local", "location": "/path/to/java/project"}'
+
+# 2. 触发索引
+curl -X POST http://localhost:8001/api/knowledge-sources/{source_id}/index
+
+# 3. 查看索引统计
+curl http://localhost:8001/api/knowledge-sources/{source_id}/stats
+```
+
+---
+
 ## 会话持久化
 
 - 所有会话历史自动保存到 `data/conversations.json`
 - 程序重启后自动恢复，无需重新开始对话
 - CLI、API 和前端 Web 共享同一个会话存储文件
+
+---
+
+## 更新日志
+
+### Phase 2 — v2.0.0（2026-03-18）
+
+**中文搜索优化 + 精确搜索 + 配置解析 + 知识源管理 API**
+
+#### 新功能
+
+- **中文语义搜索支持**：将嵌入模型从 `ONNXMiniLM_L6_V2`（仅英文）切换为 `paraphrase-multilingual-MiniLM-L12-v2`（多语言），中文查询如"查找处理订单的代码"现在可以正确匹配到 `BillOrder*` 等 Java 类
+- **精确关键词搜索**（`GrepCodeTool`）：新增 `grep_code` 工具，支持在代码内容中精确搜索 icon 名、CSS class、变量名等关键词。当 SQLite 存储的内容被截断时，自动回退到源文件搜索
+- **配置文件结构化解析**（`ConfigParser`）：新增 `config_parser.py`，支持 application.yml/properties 递归扁平化为 key-value、从文件名自动提取 profile（如 `application-dev.yml` → `dev`）、pom.xml 依赖解析
+- **配置查询工具**（`ConfigLookupTool` / `ListConfigsTool`）：新增 `config_tools.py`，Agent 可按 key 精确查找或语义搜索配置项
+- **知识源管理 REST API**：新增 `knowledge.py` 路由，提供 7 个端点（注册/列表/详情/删除/索引/同步/统计）
+
+#### 改进
+
+- `code_parser.py`：hbs/js 文件 content 存储上限从 3000 提升至 5000 字符
+- `unified_indexer.py`：新增 `_get_or_recreate_collection()` 方法，自动处理嵌入模型切换导致的 ChromaDB collection 冲突
+- `unified_indexer.py`：新增 SQLite schema 向后兼容迁移（`ALTER TABLE` 添加缺失列）
+- `conversation.py`：Agent system_message 更新为四大类工具，新增工具使用指导原则
+- 前端标题从"PDM 智能助手"更名为"知识中枢助手"
+
+#### 兼容性备注
+
+> 本次升级因开发机为 **macOS x86_64**，PyTorch 2.4+ 无对应 wheel 包，无法使用最新版 `sentence-transformers`。因此降级使用 **`sentence-transformers==3.0.1`** 搭配 **`transformers<4.46`**，以兼容系统自带的 PyTorch 2.2.2。功能不受影响，嵌入维度同为 384 维。若在 Linux 或 Apple Silicon (arm64) 环境部署，可升级至最新版 `sentence-transformers` 以获得更好性能。
+
+#### 索引统计（Phase 2 重建后）
+
+| 指标 | 数量 |
+|------|------|
+| 索引文件数 | 5,929 |
+| 代码片段（code_chunks） | 48,527 |
+| 配置条目（config_entries） | 745 |
+| 跨层引用（cross_references） | 11,988 |
+
+### Phase 1 — v1.0.0
+
+**统一知识源框架 + Java/XML/hbs/JS 代码解析索引**
+
+- 统一索引器（`unified_indexer.py`）：管理 SQLite schema 扩展 + ChromaDB 多 Collection
+- 代码解析器（`code_parser.py`）：支持 Java/MyBatis XML/hbs/jQuery JS 四类文件
+- 链路追踪工具（`trace_tools.py`）：Config → Controller → Service → Mapper → Table 全链路追踪
+- 知识源管理器（`source_manager.py`）：注册/同步/删除知识源
+- 增量索引：基于文件 MD5 自动跳过未变化文件

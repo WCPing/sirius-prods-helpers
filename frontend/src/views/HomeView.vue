@@ -4,7 +4,7 @@
     <div class="layout-header">
       <div class="header-left">
         <el-icon class="logo-icon"><DataAnalysis /></el-icon>
-        <span class="header-title">PDM 智能助手</span>
+        <span class="header-title">知识中枢助手</span>
       </div>
       <div class="header-right">
         <!-- 流式/普通模式切换 -->

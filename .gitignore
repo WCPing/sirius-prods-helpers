@@ -1,6 +1,7 @@
 # Python
 /data
 /files
+/logs
 .env
 .venv
 /**/__pycache__

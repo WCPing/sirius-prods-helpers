@@ -16,7 +16,7 @@ export default defineConfig({
     // 代理后端 API，解决跨域问题（开发环境）
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:5174',
         changeOrigin: true,
         rewrite: (path) => path
       }

@@ -17,6 +17,13 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _get_embedding_fn():
+    """统一的嵌入函数工厂，使用多语言模型。"""
+    return embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=settings.MODEL_NAME
+    )
+
+
 class TraceComponentTool(BaseTool):
     name: str = "trace_component"
     description: str = (
@@ -29,7 +36,7 @@ class TraceComponentTool(BaseTool):
         chroma_path = settings.CHROMA_DB_PATH
 
         # Step 1: 语义搜索找到相关代码
-        embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        embedding_fn = _get_embedding_fn()
         client = PersistentClient(path=chroma_path)
         try:
             collection = client.get_collection(name="code_chunks", embedding_function=embedding_fn)

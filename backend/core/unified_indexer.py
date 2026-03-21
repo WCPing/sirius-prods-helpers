@@ -35,17 +35,14 @@ class UnifiedIndexer:
 
         # ChromaDB 客户端和嵌入函数
         self.chroma_client = chromadb.PersistentClient(path=self.chroma_path)
-        self.embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=settings.MODEL_NAME
+        )
 
         # 保留现有 pdm_metadata collection，新增 code_chunks 和 config_entries
-        self.code_collection = self.chroma_client.get_or_create_collection(
-            name="code_chunks",
-            embedding_function=self.embedding_fn,
-        )
-        self.config_collection = self.chroma_client.get_or_create_collection(
-            name="config_entries",
-            embedding_function=self.embedding_fn,
-        )
+        # 处理嵌入模型切换导致的 collection 冲突
+        self.code_collection = self._get_or_recreate_collection("code_chunks")
+        self.config_collection = self._get_or_recreate_collection("config_entries")
 
     # ------------------------------------------------------------------
     # SQLite schema 扩展（新增 5 张表，保留现有 4 张 PDM 表）
@@ -95,6 +92,8 @@ class UnifiedIndexer:
                 config_key TEXT NOT NULL,
                 config_value TEXT DEFAULT '',
                 config_type TEXT DEFAULT 'property',
+                comment TEXT DEFAULT '',
+                profile TEXT DEFAULT '',
                 FOREIGN KEY(source_id) REFERENCES knowledge_sources(id)
             )
         """)
@@ -135,9 +134,38 @@ class UnifiedIndexer:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_cross_references_ref_type ON cross_references(ref_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_cross_references_from_id ON cross_references(from_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexed_files_source ON indexed_files(source_id, rel_path)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_config_entries_source ON config_entries(source_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_config_entries_key ON config_entries(config_key)")
+
+        # 兼容旧表：如果 config_entries 缺少 comment/profile 列则添加
+        try:
+            cursor.execute("ALTER TABLE config_entries ADD COLUMN comment TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+        try:
+            cursor.execute("ALTER TABLE config_entries ADD COLUMN profile TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
 
         conn.commit()
         conn.close()
+
+    def _get_or_recreate_collection(self, name: str):
+        """获取或重建 collection，处理嵌入模型切换导致的冲突。"""
+        try:
+            return self.chroma_client.get_or_create_collection(
+                name=name,
+                embedding_function=self.embedding_fn,
+            )
+        except ValueError as e:
+            if "conflict" in str(e).lower():
+                logger.warning(f"Embedding function conflict for '{name}', recreating collection...")
+                self.chroma_client.delete_collection(name)
+                return self.chroma_client.create_collection(
+                    name=name,
+                    embedding_function=self.embedding_fn,
+                )
+            raise
 
     # ------------------------------------------------------------------
     # 索引调度
@@ -194,16 +222,19 @@ class UnifiedIndexer:
     def index_code_source(self, source_id: str, code_dir: str):
         """遍历代码目录，解析并索引所有匹配文件。"""
         from backend.core.code_parser import CodeParser
+        from backend.core.config_parser import ConfigParser
 
         if not os.path.exists(code_dir):
             logger.error(f"Code directory not found: {code_dir}")
             return
 
         parser = CodeParser(source_id)
+        config_parser = ConfigParser(source_id)
         extensions = settings.CODE_INDEX_EXTENSIONS
         exclude_dirs = set(settings.CODE_EXCLUDE_DIRS)
         file_count = 0
         chunk_count = 0
+        config_count = 0
 
         for root, dirs, files in os.walk(code_dir):
             # 原地修改 dirs 列表，跳过排除目录
@@ -226,10 +257,19 @@ class UnifiedIndexer:
                     continue
 
                 try:
+                    # 代码 chunk 解析
                     chunks = parser.parse_file(abs_path, rel_path)
                     if chunks:
                         self._store_chunks(source_id, chunks)
                         chunk_count += len(chunks)
+
+                    # 配置文件解析（yml/yaml/properties/pom.xml）
+                    if ext in (".yml", ".yaml", ".properties") or fname.lower() == "pom.xml":
+                        config_entries = config_parser.parse_file(abs_path, rel_path)
+                        if config_entries:
+                            self._store_config_entries(source_id, config_entries)
+                            config_count += len(config_entries)
+
                     self._update_file_hash(source_id, rel_path, abs_path)
                     file_count += 1
                 except Exception as e:
@@ -244,7 +284,7 @@ class UnifiedIndexer:
         )
         conn.commit()
         conn.close()
-        logger.info(f"Code source '{source_id}' indexed: {file_count} files, {chunk_count} chunks")
+        logger.info(f"Code source '{source_id}' indexed: {file_count} files, {chunk_count} chunks, {config_count} config entries")
 
     def reindex_source(self, source_id: str):
         """清除旧数据后全量重建索引。"""
@@ -337,6 +377,61 @@ class UnifiedIndexer:
                     metadatas=chroma_metas[i:end],
                 )
 
+    def _store_config_entries(self, source_id: str, entries: list):
+        """批量写入 config_entries 表 + ChromaDB config_entries collection。"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        chroma_ids = []
+        chroma_docs = []
+        chroma_metas = []
+
+        for entry in entries:
+            cursor.execute("""
+                INSERT OR REPLACE INTO config_entries
+                (entry_id, source_id, file_path, config_key, config_value,
+                 config_type, comment, profile)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                entry.entry_id, source_id, entry.file_path,
+                entry.key_path, entry.value, entry.config_type,
+                entry.comment, entry.profile,
+            ))
+
+            # ChromaDB document for semantic search
+            doc_parts = [
+                f"config: {entry.key_path} = {entry.value}",
+                f"file: {entry.file_path}",
+            ]
+            if entry.profile:
+                doc_parts.append(f"profile: {entry.profile}")
+            if entry.comment:
+                doc_parts.append(f"comment: {entry.comment}")
+
+            chroma_ids.append(entry.entry_id)
+            chroma_docs.append("\n".join(doc_parts))
+            chroma_metas.append({
+                "source_id": source_id,
+                "file_path": entry.file_path,
+                "config_type": entry.config_type,
+                "key_path": entry.key_path,
+                "profile": entry.profile,
+            })
+
+        conn.commit()
+        conn.close()
+
+        # ChromaDB batch upsert
+        if chroma_ids:
+            batch_size = 100
+            for i in range(0, len(chroma_ids), batch_size):
+                end = min(i + batch_size, len(chroma_ids))
+                self.config_collection.upsert(
+                    ids=chroma_ids[i:end],
+                    documents=chroma_docs[i:end],
+                    metadatas=chroma_metas[i:end],
+                )
+
     # ------------------------------------------------------------------
     # 增量更新辅助
     # ------------------------------------------------------------------
@@ -391,6 +486,10 @@ class UnifiedIndexer:
         cursor.execute("SELECT chunk_id FROM code_chunks WHERE source_id = ?", (source_id,))
         chunk_ids = [row[0] for row in cursor.fetchall()]
 
+        # 获取所有 config entry_id 用于清理 ChromaDB
+        cursor.execute("SELECT entry_id FROM config_entries WHERE source_id = ?", (source_id,))
+        config_ids = [row[0] for row in cursor.fetchall()]
+
         # 清理 SQLite 表
         cursor.execute("DELETE FROM code_chunks WHERE source_id = ?", (source_id,))
         cursor.execute("DELETE FROM config_entries WHERE source_id = ?", (source_id,))
@@ -400,12 +499,19 @@ class UnifiedIndexer:
         conn.commit()
         conn.close()
 
-        # 清理 ChromaDB
+        # 清理 ChromaDB code_chunks
         if chunk_ids:
             batch_size = 100
             for i in range(0, len(chunk_ids), batch_size):
                 end = min(i + batch_size, len(chunk_ids))
                 self.code_collection.delete(ids=chunk_ids[i:end])
+
+        # 清理 ChromaDB config_entries
+        if config_ids:
+            batch_size = 100
+            for i in range(0, len(config_ids), batch_size):
+                end = min(i + batch_size, len(config_ids))
+                self.config_collection.delete(ids=config_ids[i:end])
 
         logger.info(f"Cleared all indexed data for source '{source_id}'")
 

@@ -74,11 +74,16 @@ def _get_agent():
             GetCodeStructureTool,
             GetClassDetailTool,
             SearchAPIEndpointsTool,
+            GrepCodeTool,
         )
         from backend.core.trace_tools import (
             TraceComponentTool,
             FindConfigUsageTool,
             FindTableUsageTool,
+        )
+        from backend.core.config_tools import (
+            ConfigLookupTool,
+            ListConfigsTool,
         )
 
         provider = settings.LLM_PROVIDER
@@ -92,13 +97,14 @@ def _get_agent():
                 anthropic_api_url=settings.ANTHROPIC_BASE_URL or None,
                 temperature=0.1,
                 max_tokens=2000,
+                timeout=settings.LLM_TIMEOUT,
             )
         else:
             llm = ChatDeepSeek(
                 model="deepseek-chat",
                 temperature=0.1,
                 max_tokens=2000,
-                timeout=None,
+                timeout=settings.LLM_TIMEOUT,
                 max_retries=2,
             )
 
@@ -109,21 +115,25 @@ def _get_agent():
             SearchTablesTool(),
             RelationshipTool(),
             ExecuteSQLTool(),
-            # 代码工具（新增）
+            # 代码工具
             SearchCodeTool(),
             GetCodeStructureTool(),
             GetClassDetailTool(),
             SearchAPIEndpointsTool(),
-            # 链路追踪工具（新增）
+            GrepCodeTool(),
+            # 链路追踪工具
             TraceComponentTool(),
             FindConfigUsageTool(),
             FindTableUsageTool(),
+            # 配置工具
+            ConfigLookupTool(),
+            ListConfigsTool(),
         ]
 
         system_message = SystemMessage(
-            content="""你是一个统一知识中枢助手，能够跨 PDM 数据模型、代码仓库和数据库进行智能问答与链路追踪。
+            content="""你是一个统一知识中枢助手，能够跨 PDM 数据模型、代码仓库、配置文件和数据库进行智能问答与链路追踪。
 
-你拥有以下三大类工具：
+你拥有以下四大类工具：
 
 ## 1. PDM / 数据库工具
 - `list_tables`: 列出 PDM 文档中的所有表
@@ -133,23 +143,30 @@ def _get_agent():
 - `execute_sql`: 在 MySQL 或 Oracle 上执行 SQL 查询
 
 ## 2. 代码工具
-- `search_code`: 语义搜索代码片段（类、方法、模板等）
+- `search_code`: 语义搜索代码片段（类、方法、模板等），支持中文查询
 - `get_code_structure`: 获取文件的代码结构（类/方法/字段列表）
 - `get_class_detail`: 获取指定类的详细信息（注解、方法、字段）
 - `search_api_endpoints`: 搜索 Spring REST API 端点
+- `grep_code`: 精确关键词搜索（CSS class、icon 名、变量名、字符串等）
 
 ## 3. 链路追踪工具
 - `trace_component`: 追踪组件的完整调用链（Config → Controller → Service → Mapper → Table）
 - `find_config_usage`: 查找引用指定配置键的所有代码
 - `find_table_usage`: 查找引用指定数据库表的所有代码
 
+## 4. 配置工具
+- `config_lookup`: 配置项查找（先精确匹配 key，再语义搜索）
+- `list_configs`: 配置文件概览（按文件分组展示配置数量）
+
 ## 工作原则
 1. 根据用户问题类型选择合适的工具组合
 2. 对于代码问题，优先使用语义搜索定位相关代码，再深入查看详情
-3. 对于跨层追踪（如"某个表被哪些代码使用"），使用链路追踪工具
-4. 执行 SQL 前，先确认表结构和数据库类型
-5. 限制查询结果数量（如 LIMIT 5）避免输出过多
-6. 使用用户的语言（中文/英文）回复"""
+3. 对于精确搜索（icon 名、CSS class、变量名等），使用 `grep_code`
+4. 对于配置问题（数据库连接、端口号等），使用 `config_lookup`
+5. 对于跨层追踪（如"某个表被哪些代码使用"），使用链路追踪工具
+6. 执行 SQL 前，先确认表结构和数据库类型
+7. 限制查询结果数量（如 LIMIT 5）避免输出过多
+8. 使用用户的语言（中文/英文）回复"""
         )
 
         _agent_executor = create_agent(llm, tools, system_prompt=system_message)
@@ -318,20 +335,27 @@ def send_message(session_id: str, body: SendMessageRequest):
         # 切换到目标会话
         conv_manager.switch_session(session_id)
 
-        # 获取历史 + 当前消息
-        history = conv_manager.get_history()
-        current_msg = HumanMessage(content=body.message)
-        messages_to_send = history + [current_msg]
+        # 先保存用户消息（防止 Agent 超时/失败后消息丢失）
+        conv_manager.add_user_message(body.message)
+
+        # 获取历史（已包含刚保存的用户消息）
+        messages_to_send = conv_manager.get_history()
 
         # 调用 Agent
-        agent = _get_agent()
-        response = agent.invoke({"messages": messages_to_send})
+        try:
+            agent = _get_agent()
+            response = agent.invoke({"messages": messages_to_send})
+        except Exception as e:
+            logger.error(f"Agent 调用失败: {e}")
+            raise HTTPException(
+                status_code=504,
+                detail=f"AI 响应超时或调用失败，您的消息已保存，请稍后重试。错误: {e}",
+            )
 
         ai_msg = response["messages"][-1]
         assistant_content = str(ai_msg.content)
 
-        # 保存本轮消息到会话历史
-        conv_manager.add_user_message(body.message)
+        # 保存 AI 回复
         conv_manager.add_ai_message(AIMessage(content=assistant_content))
 
         return ChatResponse(
