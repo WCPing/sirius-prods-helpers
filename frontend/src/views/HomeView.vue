@@ -26,6 +26,15 @@
 
         <el-divider direction="vertical" />
 
+        <el-tooltip content="知识源管理" placement="bottom">
+          <el-button
+            circle
+            size="small"
+            :icon="Collection"
+            @click="$router.push('/knowledge')"
+          />
+        </el-tooltip>
+
         <el-tooltip content="API 文档" placement="bottom">
           <el-button
             circle
@@ -53,7 +62,7 @@
 
 <script setup>
 import { onMounted } from 'vue'
-import { Document, Lightning } from '@element-plus/icons-vue'
+import { Document, Lightning, Collection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useConversationStore } from '@/stores/conversation'
 import SessionList from '@/components/SessionList.vue'
@@ -74,7 +83,7 @@ function onStreamModeChange(val) {
 }
 
 function openApiDocs() {
-  window.open('http://127.0.0.1:8000/docs', '_blank')
+  window.open('http://127.0.0.1:5174/docs', '_blank')
 }
 </script>
 

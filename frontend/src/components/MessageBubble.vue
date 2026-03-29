@@ -14,6 +14,7 @@
         <!-- 内容：AI 消息渲染 Markdown，用户消息纯文本 -->
         <div
           v-if="!isUser"
+          ref="markdownEl"
           class="markdown-body"
           v-html="renderedContent"
         />
@@ -43,10 +44,41 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { Cpu, User, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import java from 'highlight.js/lib/languages/java'
+import javascript from 'highlight.js/lib/languages/javascript'
+import xml from 'highlight.js/lib/languages/xml'
+import yaml from 'highlight.js/lib/languages/yaml'
+import sql from 'highlight.js/lib/languages/sql'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import jsonLang from 'highlight.js/lib/languages/json'
+import css from 'highlight.js/lib/languages/css'
+import properties from 'highlight.js/lib/languages/properties'
+import typescript from 'highlight.js/lib/languages/typescript'
+
+hljs.registerLanguage('java', java)
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('html', xml)
+hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('yml', yaml)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('py', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('json', jsonLang)
+hljs.registerLanguage('css', css)
+hljs.registerLanguage('properties', properties)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('ts', typescript)
 
 const props = defineProps({
   message: {
@@ -62,6 +94,7 @@ const props = defineProps({
 })
 
 const isUser = computed(() => props.message.role === 'user')
+const markdownEl = ref(null)
 
 // 将 Markdown 渲染为 HTML（仅 AI 消息）
 const renderedContent = computed(() => {
@@ -74,6 +107,21 @@ const renderedContent = computed(() => {
   } catch {
     return props.message.content
   }
+})
+
+// 渲染完成后对代码块做语法高亮（直接操作 DOM，避免转义问题）
+function highlightCodeBlocks() {
+  if (!markdownEl.value) return
+  markdownEl.value.querySelectorAll('pre code').forEach((el) => {
+    if (!el.dataset.highlighted) {
+      hljs.highlightElement(el)
+    }
+  })
+}
+
+watch(renderedContent, async () => {
+  await nextTick()
+  highlightCodeBlocks()
 })
 
 async function copyContent() {

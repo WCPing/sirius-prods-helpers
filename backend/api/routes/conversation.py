@@ -4,19 +4,21 @@ backend/api/routes/conversation.py
 会话管理及 AI 对话相关 API 路由。
 
 接口列表：
-  GET    /api/conversations                          - 列出所有会话
-  POST   /api/conversations                          - 创建新会话
-  GET    /api/conversations/{session_id}             - 获取会话详情
-  GET    /api/conversations/{session_id}/history     - 获取会话消息历史
-  POST   /api/conversations/{session_id}/messages    - 发送消息（AI 对话）
-  DELETE /api/conversations/{session_id}/history     - 清空会话历史
-  DELETE /api/conversations/{session_id}             - 删除会话
+  GET    /api/conversations                                  - 列出所有会话
+  POST   /api/conversations                                  - 创建新会话
+  GET    /api/conversations/{session_id}                     - 获取会话详情
+  GET    /api/conversations/{session_id}/history             - 获取会话消息历史
+  POST   /api/conversations/{session_id}/messages            - 发送消息（AI 对话）
+  POST   /api/conversations/{session_id}/messages/stream     - 发送消息（SSE 流式）
+  DELETE /api/conversations/{session_id}/history             - 清空会话历史
+  DELETE /api/conversations/{session_id}                     - 删除会话
 """
 
-import os
+import json
 import logging
 from fastapi import APIRouter, HTTPException
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, AIMessage
 
 from backend.api.models.request import CreateSessionRequest, SendMessageRequest
 from backend.api.models.response import (
@@ -369,6 +371,81 @@ def send_message(session_id: str, body: SendMessageRequest):
     except Exception as e:
         logger.error(f"send_message error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------
+# 发送消息（SSE 流式响应）
+# ---------------------------------------------------------------
+
+@router.post(
+    "/{session_id}/messages/stream",
+    summary="发送消息（SSE 流式）",
+    description="向指定会话发送一条消息，AI Agent 以 SSE 流式逐 token 返回回复。",
+)
+async def send_message_stream(session_id: str, body: SendMessageRequest):
+    conv_manager = _get_conv_manager()
+    session = conv_manager.sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"会话 '{session_id}' 不存在")
+
+    # 切换到目标会话
+    conv_manager.switch_session(session_id)
+
+    # 保存用户消息
+    conv_manager.add_user_message(body.message)
+
+    # 获取历史（已包含刚保存的用户消息）
+    messages_to_send = conv_manager.get_history()
+
+    async def event_generator():
+        full_content = ""
+        try:
+            agent = _get_agent()
+            logger.info(f"[Stream] 开始流式调用 session={session_id}")
+            async for event, metadata in agent.astream(
+                {"messages": messages_to_send},
+                stream_mode="messages",
+            ):
+                # 只输出 AIMessage 的文本 content（跳过 tool_call、HumanMessage、ToolMessage 等）
+                if not isinstance(event, AIMessage):
+                    continue
+                if event.tool_calls:
+                    continue
+
+                # 提取文本 token
+                # content 可能是 str（无工具场景）或 list（有工具场景，Anthropic 返回 content blocks）
+                token = ""
+                if isinstance(event.content, str):
+                    token = event.content
+                elif isinstance(event.content, list):
+                    for block in event.content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            token += block.get("text", "")
+                        elif isinstance(block, str):
+                            token += block
+
+                if token:
+                    full_content += token
+                    yield f"data: {json.dumps({'content': token}, ensure_ascii=False)}\n\n"
+            logger.info(f"[Stream] 流式完成 session={session_id}, length={len(full_content)}")
+        except Exception as e:
+            logger.error(f"[Stream] error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            # 保存完整 AI 回复
+            if full_content:
+                conv_manager.add_ai_message(AIMessage(content=full_content))
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------

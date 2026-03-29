@@ -459,6 +459,16 @@ curl http://localhost:8001/api/knowledge-sources/{source_id}/stats
 
 > 本次升级因开发机为 **macOS x86_64**，PyTorch 2.4+ 无对应 wheel 包，无法使用最新版 `sentence-transformers`。因此降级使用 **`sentence-transformers==3.0.1`** 搭配 **`transformers<4.46`**，以兼容系统自带的 PyTorch 2.2.2。功能不受影响，嵌入维度同为 384 维。若在 Linux 或 Apple Silicon (arm64) 环境部署，可升级至最新版 `sentence-transformers` 以获得更好性能。
 
+
+#### 切分策略
+  PDM和代码两端都没有用 LangChain 的 TextSplitter 或类似的通用文本切片工具。 切分策略是：
+
+  - PDM：按数据库对象（表/列）自然切分，粒度固定且很小
+  - Code：按代码语义结构（类/方法/字段/SQL语句）切分，粒度由 AST 决定
+  - 都不存在"把一段长文本按 500 token 一段切开"这种传统 RAG 切片操作
+
+  这种基于语义结构的切分方式比通用文本切片更精准，不会出现把一个方法切成两半的情况。
+
 #### 索引统计（Phase 2 重建后）
 
 | 指标 | 数量 |

@@ -44,12 +44,13 @@
       <div class="empty-illustration">
         <el-icon style="font-size: 64px; color: #dcdfe6"><DataAnalysis /></el-icon>
       </div>
-      <h3>欢迎使用 PDM 智能助手</h3>
-      <p>基于 AI 的数据库模型分析助手</p>
+      <h3>欢迎使用知识中枢助手</h3>
+      <p>基于 AI 的统一知识中枢 — 跨代码、配置、数据库智能问答</p>
       <ul class="feature-list">
         <li>📊 查询表结构和字段信息</li>
         <li>🔗 分析表间关联关系</li>
-        <li>🔍 语义搜索相关数据表</li>
+        <li>🔍 语义搜索代码与配置</li>
+        <li>🔄 链路追踪与交叉引用</li>
         <li>⚡ 直接执行 SQL 查询</li>
       </ul>
       <el-button type="primary" :icon="Plus" @click="onNewSession">
