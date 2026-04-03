@@ -18,6 +18,7 @@ sirius-prods-helpers-test1/
 │   │   ├── code_parser.py          # 代码解析器（Java/XML/hbs/JS）
 │   │   ├── config_parser.py        # 配置解析器（yml/properties/pom.xml）
 │   │   ├── db_manager.py           # MySQL / Oracle 连接管理
+│   │   ├── ocr_service.py          # 图片 OCR 文字识别服务
 │   │   ├── tools.py                # PDM / 数据库 Agent 工具集
 │   │   ├── code_tools.py           # 代码搜索 Agent 工具集（含 GrepCodeTool）
 │   │   ├── config_tools.py         # 配置查询 Agent 工具集
@@ -73,10 +74,47 @@ sirius-prods-helpers-test1/
 | 层级 | 技术 |
 |------|------|
 | **AI / 后端** | Python 3.10+、FastAPI、LangChain、DeepSeek / Claude |
+| **OCR 识别** | RapidOCR（rapidocr-onnxruntime）、Pillow — 支持中英文图片文字识别 |
 | **向量嵌入** | sentence-transformers (`paraphrase-multilingual-MiniLM-L12-v2`，支持中英文) |
 | **数据存储** | SQLite（元数据 + 代码索引 + 配置索引）、ChromaDB（向量检索）、MySQL / Oracle（业务库） |
 | **代码解析** | javalang（Java AST）、lxml（XML/MyBatis）、pyyaml（YAML 配置）、GitPython（仓库同步） |
 | **前端** | Vue 3、Vite、Element Plus、Pinia、Axios |
+
+---
+
+## 架构总览
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                     Frontend (Vue3)                         │
+│  知识源管理 │ 统一问答 │ 代码片段高亮 │ 配置浏览器        │
+└──────────────────────────┬─────────────────────────────────┘
+                           │
+┌──────────────────────────▼─────────────────────────────────┐
+│                   FastAPI Backend                            │
+├─────────────────────────────────────────────────────────────┤
+│  Routes: /api/knowledge-sources/*  /api/conversations/*     │
+├─────────────────────────────────────────────────────────────┤
+│             Agent (LangChain + LangGraph)                    │
+│       System Prompt (知识中枢角色，多工具路由)               │
+│                                                              │
+│  ┌──────────┬──────────┬───────────┬──────────┬──────────┐  │
+│  │code_search│config_  │search_    │get_table_│execute_  │  │
+│  │          │lookup    │knowledge  │schema    │sql       │  │
+│  │code_     │          │list_      │find_     │          │  │
+│  │structure │          │sources    │relations │          │  │
+│  └────┬─────┴────┬─────┴─────┬─────┴────┬─────┴────┬─────┘  │
+│       │          │           │          │          │          │
+├───────▼──────────▼───────────▼──────────▼──────────▼─────────┤
+│              Unified Knowledge Indexer                         │
+│   ┌─────────────┬───────────────┬───────────────────────┐    │
+│   │ CodeParser  │ ConfigParser  │ PDMParser (现有)       │    │
+│   │ .java/.vue  │ .yml/.props   │ .pdm                   │    │
+│   └─────────────┴───────────────┴───────────────────────┘    │
+├───────────────────────────────────────────────────────────────┤
+│  SQLite (元数据)  │  ChromaDB (向量)  │  MySQL/Oracle (业务) │
+└───────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -245,7 +283,7 @@ npm run dev
 |------|------|
 | **左侧 - 会话列表** | 新建 / 重命名 / 删除会话；显示消息数量和更新时间；高亮当前激活会话 |
 | **右侧 - 聊天窗口** | 消息历史展示（支持 Markdown + 代码高亮）；快捷问题推荐；自动滚底 |
-| **底部 - 输入框** | Enter 发送 / Shift+Enter 换行；AI 回复时显示打字动画；流式模式支持终止 |
+| **底部 - 输入框** | Enter 发送 / Shift+Enter 换行；支持图片上传和粘贴（OCR 识别）；AI 回复时显示打字动画；流式模式支持终止 |
 | **顶栏** | 流式 / 普通响应模式一键切换；快捷跳转 API 文档 |
 
 ### 流式响应说明
@@ -254,6 +292,25 @@ npm run dev
 - **流式模式**：AI 逐字输出，实时展示（需要后端实现 SSE 流式端点 `/messages/stream`）
 
 流式接口已在前端预留（`src/api/conversation.js → sendMessageStream`），后端实现后自动生效。
+
+### 图片上传 OCR 识别
+
+对话输入框支持图片上传和粘贴，后端通过 OCR 自动提取图片中的文字，将识别结果作为纯文本拼接到消息中发送给 LLM。此方案兼容所有 LLM 提供商（DeepSeek、Claude），因为最终只发送纯文本。
+
+**使用方式：**
+- 点击输入框左侧的图片按钮上传图片
+- 直接在输入框中粘贴剪贴板中的截图（Ctrl/Cmd+V）
+- 支持格式：PNG、JPG、JPEG、GIF、BMP、WEBP
+- 单张图片最大 5MB，单条消息最多 5 张图片
+- 仅上传图片不输入文字时，默认消息为"请分析以下图片内容"
+
+**数据流：**
+```
+用户粘贴/上传图片 → 前端转 base64 + 缩略图预览
+  → API POST { message, images[{data,filename,mime_type}] }
+  → 后端 RapidOCR 提取文字 → 拼接到用户消息
+  → LangChain Agent 处理 → 正常返回
+```
 
 ---
 
@@ -434,6 +491,30 @@ curl http://localhost:8001/api/knowledge-sources/{source_id}/stats
 ---
 
 ## 更新日志
+
+### Phase 3 — v2.1.0（2026-03-29）
+
+**图片上传 OCR 识别**
+
+#### 新功能
+
+- **图片上传 OCR 识别**：对话框支持图片上传和粘贴，后端通过 RapidOCR 提取图片中的中英文文字，将识别结果作为纯文本发送给 LLM，兼容所有 LLM 提供商
+- **前端图片交互**：输入框新增上传按钮、剪贴板粘贴监听、图片预览条（缩略图 + 删除 + 添加更多）
+- **消息气泡图片展示**：用户消息中显示图片缩略图网格，点击可全屏预览
+
+#### 涉及文件
+
+| 文件 | 变更 |
+|------|------|
+| `requirements.txt` | 新增 `rapidocr-onnxruntime`、`Pillow` |
+| `backend/core/ocr_service.py` | 新建 — OCR 服务（懒加载引擎、校验、识别、多图处理） |
+| `backend/api/models/request.py` | 新增 `ImageData` 模型；`SendMessageRequest` 增加可选 `images` 字段 |
+| `backend/api/routes/conversation.py` | `send_message` / `send_message_stream` 集成 OCR 处理 |
+| `frontend/src/api/conversation.js` | `sendMessage` / `sendMessageStream` 增加 `images` 参数 |
+| `frontend/src/stores/conversation.js` | `sendUserMessage` 支持 `{text, images}` 结构体 |
+| `frontend/src/components/MessageInput.vue` | 上传按钮、粘贴监听、预览条、结构化 payload |
+| `frontend/src/components/ChatWindow.vue` | `handleSend` 兼容字符串和结构体 |
+| `frontend/src/components/MessageBubble.vue` | 用户消息图片缩略图 + 全屏预览 |
 
 ### Phase 2 — v2.0.0（2026-03-18）
 

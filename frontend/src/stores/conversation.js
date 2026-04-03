@@ -133,9 +133,9 @@ export const useConversationStore = defineStore('conversation', () => {
 
   /**
    * 发送消息（根据 streamMode 自动选择普通/流式）
-   * @param {string} content
+   * @param {string|{text: string, images: Array}} payload - 纯文本或 {text, images} 结构
    */
-  async function sendUserMessage(content) {
+  async function sendUserMessage(payload) {
     if (!currentSessionId.value) {
       ElMessage.warning('请先选择或创建一个会话')
       return
@@ -145,48 +145,64 @@ export const useConversationStore = defineStore('conversation', () => {
       return
     }
 
-    // 先把用户消息追加到本地
-    const userMsg = { role: 'user', content, id: `user-${Date.now()}` }
+    // 统一解构 payload
+    let text, images
+    if (typeof payload === 'string') {
+      text = payload
+      images = null
+    } else {
+      text = payload.text || ''
+      images = payload.images || null
+    }
+
+    const displayContent = text || '请分析以下图片内容'
+
+    // 先把用户消息追加到本地（带图片预览信息）
+    const userMsg = {
+      role: 'user',
+      content: displayContent,
+      id: `user-${Date.now()}`,
+      images: images ? images.map((img) => ({ preview: img.preview, filename: img.filename })) : null,
+    }
     messages.value.push(userMsg)
+
+    // 准备发送给 API 的图片数据（不含 preview）
+    const apiImages = images
+      ? images.map(({ data, filename, mime_type }) => ({ data, filename, mime_type }))
+      : null
 
     sending.value = true
 
     if (streamMode.value) {
-      // ---- 流式模式 ----
-      await _sendStream(content)
+      await _sendStream(text, apiImages)
     } else {
-      // ---- 普通模式 ----
-      await _sendNormal(content)
+      await _sendNormal(text, apiImages)
     }
   }
 
   /** 普通（非流式）发送 */
-  async function _sendNormal(content) {
+  async function _sendNormal(content, images) {
     try {
-      const res = await sendMessage(currentSessionId.value, content)
+      const res = await sendMessage(currentSessionId.value, content, images)
       const aiMsg = {
         role: 'assistant',
         content: res.reply || '',
         id: `ai-${Date.now()}`
       }
       messages.value.push(aiMsg)
-      // 刷新会话列表（更新 message_count）
       await _refreshCurrentSessionInList()
     } catch (e) {
       console.error('_sendNormal error:', e)
-      // 区分超时错误和其他错误
       if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
         ElMessage.error('AI 响应超时，您的消息已保存，刷新页面后可看到。请稍后重试。')
       }
-      // 其他错误由响应拦截器统一展示，无需重复提示
     } finally {
       sending.value = false
     }
   }
 
-  /** 流式发送（预留，后端支持后自动生效） */
-  async function _sendStream(content) {
-    // 预先添加一个空的 AI 消息占位
+  /** 流式发送 */
+  async function _sendStream(content, images) {
     const aiMsgId = `ai-stream-${Date.now()}`
     const aiMsg = { role: 'assistant', content: '', id: aiMsgId }
     messages.value.push(aiMsg)
@@ -197,6 +213,7 @@ export const useConversationStore = defineStore('conversation', () => {
     _abortStream = sendMessageStream(
       currentSessionId.value,
       content,
+      images,
       // onChunk
       (chunk) => {
         streamingContent.value += chunk
@@ -212,12 +229,11 @@ export const useConversationStore = defineStore('conversation', () => {
       // onError
       (error) => {
         ElMessage.error(`流式请求失败: ${error.message}`)
-        // 回退到普通模式重试
         messages.value.splice(aiMsgIndex, 1)
         sending.value = false
         ElMessage.info('已自动切换为普通模式重试...')
         streamMode.value = false
-        _sendNormal(content)
+        _sendNormal(content, images)
       }
     )
   }

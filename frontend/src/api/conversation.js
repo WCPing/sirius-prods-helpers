@@ -53,30 +53,40 @@ export function getSessionHistory(sessionId) {
  * 发送消息（普通模式）
  * @param {string} sessionId
  * @param {string} message - 用户消息内容
+ * @param {Array} [images] - 图片列表 [{data, filename, mime_type}]
  * @returns {Promise<ChatResponse>}
  */
-export function sendMessage(sessionId, message) {
-  return request.post(`/conversations/${sessionId}/messages`, { message })
+export function sendMessage(sessionId, message, images) {
+  const body = { message }
+  if (images && images.length > 0) {
+    body.images = images
+  }
+  return request.post(`/conversations/${sessionId}/messages`, body)
 }
 
 /**
- * 发送消息（流式模式 - 预留接口）
- * 后端需要实现 SSE 流式响应端点 /api/conversations/{session_id}/messages/stream
+ * 发送消息（流式模式）
  *
  * @param {string} sessionId
  * @param {string} message
+ * @param {Array} [images] - 图片列表 [{data, filename, mime_type}]
  * @param {function} onChunk - 每次收到 chunk 时的回调 (chunk: string) => void
  * @param {function} onDone  - 流结束时的回调 () => void
  * @param {function} onError - 错误时的回调 (error: Error) => void
  * @returns {() => void} abort 函数，用于提前终止流
  */
-export function sendMessageStream(sessionId, message, onChunk, onDone, onError) {
+export function sendMessageStream(sessionId, message, images, onChunk, onDone, onError) {
   const controller = new AbortController()
+
+  const body = { message }
+  if (images && images.length > 0) {
+    body.images = images
+  }
 
   fetch(`/api/conversations/${sessionId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
     signal: controller.signal
   })
     .then(async (response) => {

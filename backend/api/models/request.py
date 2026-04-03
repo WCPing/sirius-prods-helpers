@@ -5,7 +5,7 @@ FastAPI 请求体 Pydantic 模型定义。
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import List, Optional
 
 
 # ---------------------------------------------------------------
@@ -59,9 +59,17 @@ class CreateSessionRequest(BaseModel):
     }
 
 
+class ImageData(BaseModel):
+    """上传图片数据"""
+    data: str = Field(..., description="base64 编码的图片数据")
+    filename: str = Field(default="", description="文件名")
+    mime_type: str = Field(default="image/png", description="MIME 类型")
+
+
 class SendMessageRequest(BaseModel):
     """向会话发送消息（AI 对话）请求体"""
-    message: str = Field(..., description="用户发送的消息内容", min_length=1)
+    message: str = Field(default="", description="用户发送的消息内容")
+    images: Optional[List[ImageData]] = Field(default=None, description="附件图片列表")
 
     model_config = {
         "json_schema_extra": {

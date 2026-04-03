@@ -18,7 +18,19 @@
           class="markdown-body"
           v-html="renderedContent"
         />
-        <div v-else class="user-text">{{ message.content }}</div>
+        <div v-else class="user-text">
+          <!-- 用户附件图片 -->
+          <div v-if="message.images && message.images.length" class="user-images">
+            <img
+              v-for="(img, idx) in message.images"
+              :key="idx"
+              :src="img.preview"
+              class="user-image-thumb"
+              @click="previewImage(idx)"
+            />
+          </div>
+          {{ message.content }}
+        </div>
       </div>
 
       <!-- 消息时间（AI 消息显示复制按钮） -->
@@ -41,12 +53,23 @@
       <el-icon><User /></el-icon>
     </div>
   </div>
+
+  <!-- 图片全屏预览 -->
+  <Teleport to="body">
+    <el-image-viewer
+      v-if="showViewer"
+      :url-list="viewerUrls"
+      :initial-index="viewerIndex"
+      @close="showViewer = false"
+    />
+  </Teleport>
 </template>
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
 import { Cpu, User, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { ElImageViewer } from 'element-plus'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import java from 'highlight.js/lib/languages/java'
@@ -123,6 +146,19 @@ watch(renderedContent, async () => {
   await nextTick()
   highlightCodeBlocks()
 })
+
+// 图片全屏预览
+const showViewer = ref(false)
+const viewerIndex = ref(0)
+const viewerUrls = computed(() => {
+  if (!props.message.images) return []
+  return props.message.images.map((img) => img.preview)
+})
+
+function previewImage(idx) {
+  viewerIndex.value = idx
+  showViewer.value = true
+}
 
 async function copyContent() {
   try {
@@ -212,6 +248,27 @@ async function copyContent() {
 .user-text {
   font-size: 14px;
   white-space: pre-wrap;
+}
+
+.user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.user-image-thumb {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  transition: opacity 0.15s;
+}
+
+.user-image-thumb:hover {
+  opacity: 0.85;
 }
 
 /* ---- 流式光标 ---- */

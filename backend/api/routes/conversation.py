@@ -44,6 +44,29 @@ _agent_executor = None
 _conv_manager = None
 
 
+def _build_message_with_ocr(body) -> str:
+    """
+    处理请求体，如果包含图片则进行 OCR 识别并拼接到消息中。
+    返回最终要发送给 LLM 的纯文本消息。
+    """
+    message = body.message or ""
+    if not body.images:
+        return message
+
+    from backend.core.ocr_service import process_images
+
+    images_data = [img.model_dump() for img in body.images]
+    ocr_text = process_images(images_data)
+
+    if not ocr_text:
+        return message or "请分析以下图片内容"
+
+    if not message:
+        message = "请分析以下图片内容"
+
+    return f"{message}\n\n---\n[附件图片OCR识别结果]\n{ocr_text}"
+
+
 def _get_conv_manager():
     """获取或初始化会话管理器（单例）"""
     global _conv_manager
@@ -337,8 +360,13 @@ def send_message(session_id: str, body: SendMessageRequest):
         # 切换到目标会话
         conv_manager.switch_session(session_id)
 
+        # 处理图片 OCR（如有）
+        final_message = _build_message_with_ocr(body)
+        if not final_message.strip():
+            raise HTTPException(status_code=400, detail="消息内容不能为空")
+
         # 先保存用户消息（防止 Agent 超时/失败后消息丢失）
-        conv_manager.add_user_message(body.message)
+        conv_manager.add_user_message(final_message)
 
         # 获取历史（已包含刚保存的用户消息）
         messages_to_send = conv_manager.get_history()
@@ -391,8 +419,13 @@ async def send_message_stream(session_id: str, body: SendMessageRequest):
     # 切换到目标会话
     conv_manager.switch_session(session_id)
 
+    # 处理图片 OCR（如有）
+    final_message = _build_message_with_ocr(body)
+    if not final_message.strip():
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+
     # 保存用户消息
-    conv_manager.add_user_message(body.message)
+    conv_manager.add_user_message(final_message)
 
     # 获取历史（已包含刚保存的用户消息）
     messages_to_send = conv_manager.get_history()

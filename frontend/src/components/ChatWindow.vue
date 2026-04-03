@@ -163,12 +163,14 @@ function onNewSession() {
 }
 
 function onQuickQuestion(q) {
-  handleSend(q)
+  handleSend({ text: q, images: null })
 }
 
-// 发送消息
-async function handleSend(content) {
-  await store.sendUserMessage(content)
+// 发送消息（兼容字符串和 {text, images} 结构体）
+async function handleSend(payload) {
+  // 快捷问题传入的可能是纯字符串
+  const normalized = typeof payload === 'string' ? { text: payload, images: null } : payload
+  await store.sendUserMessage(normalized)
   await nextTick()
   scrollToBottom()
 }

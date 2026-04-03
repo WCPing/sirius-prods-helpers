@@ -31,6 +31,10 @@ fastapi
 uvicorn[standard]
 pydantic
 
+# OCR 图片识别
+rapidocr-onnxruntime
+Pillow
+
 # 代码解析 & Git 操作
 javalang
 pyyaml
