@@ -142,6 +142,7 @@ class MessageItem(BaseModel):
     """单条消息"""
     role: str = Field(..., description="消息角色：user 或 assistant")
     content: str = Field(..., description="消息内容")
+    timestamp: Optional[int] = Field(default=None, description="消息时间戳（毫秒）")
 
 
 class SessionHistoryResponse(BaseResponse):

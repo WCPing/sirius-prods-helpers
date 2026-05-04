@@ -56,6 +56,9 @@ class Settings:
     MYSQL_URL: str = os.getenv("MYSQL_URL", "")
     ORACLE_URL: str = os.getenv("ORACLE_URL", "")
 
+    # 数据库查询开关：true = 允许 LLM 访问数据库；未配置或其它值 = 禁止
+    ENABLE_DB_QUERY: bool = os.getenv("ENABLE_DB_QUERY", "false").lower() == "true"
+
     # ---------------------------------------------------------------
     # 知识源配置
     # ---------------------------------------------------------------

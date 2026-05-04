@@ -52,6 +52,11 @@ class ConversationSession:
 
     def add_message(self, message: BaseMessage) -> None:
         """添加一条消息到历史记录，并在超出限制时自动裁剪。"""
+        # 为消息打上时间戳（毫秒），存储在 additional_kwargs 中以保证可序列化
+        if message.additional_kwargs is None:
+            message.additional_kwargs = {}
+        if "timestamp" not in message.additional_kwargs:
+            message.additional_kwargs["timestamp"] = int(datetime.now().timestamp() * 1000)
         self.messages.append(message)
         self.updated_at = datetime.now().isoformat()
 

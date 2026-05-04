@@ -162,6 +162,7 @@ export const useConversationStore = defineStore('conversation', () => {
       role: 'user',
       content: displayContent,
       id: `user-${Date.now()}`,
+      timestamp: Date.now(),
       images: images ? images.map((img) => ({ preview: img.preview, filename: img.filename })) : null,
     }
     messages.value.push(userMsg)
@@ -187,15 +188,21 @@ export const useConversationStore = defineStore('conversation', () => {
       const aiMsg = {
         role: 'assistant',
         content: res.reply || '',
-        id: `ai-${Date.now()}`
+        id: `ai-${Date.now()}`,
+        timestamp: Date.now()
       }
       messages.value.push(aiMsg)
       await _refreshCurrentSessionInList()
     } catch (e) {
       console.error('_sendNormal error:', e)
-      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
-        ElMessage.error('AI 响应超时，您的消息已保存，刷新页面后可看到。请稍后重试。')
+      const errorMsg = {
+        role: 'assistant',
+        content: 'AI 响应超时或调用失败，您的消息已保存，请稍后重试。',
+        id: `ai-error-${Date.now()}`,
+        timestamp: Date.now(),
+        isError: true
       }
+      messages.value.push(errorMsg)
     } finally {
       sending.value = false
     }
@@ -204,7 +211,7 @@ export const useConversationStore = defineStore('conversation', () => {
   /** 流式发送 */
   async function _sendStream(content, images) {
     const aiMsgId = `ai-stream-${Date.now()}`
-    const aiMsg = { role: 'assistant', content: '', id: aiMsgId }
+    const aiMsg = { role: 'assistant', content: '', id: aiMsgId, timestamp: Date.now() }
     messages.value.push(aiMsg)
     streamingContent.value = ''
 
@@ -228,12 +235,12 @@ export const useConversationStore = defineStore('conversation', () => {
       },
       // onError
       (error) => {
-        ElMessage.error(`流式请求失败: ${error.message}`)
-        messages.value.splice(aiMsgIndex, 1)
+        console.error('_sendStream error:', error)
+        messages.value[aiMsgIndex].content = 'AI 响应超时或调用失败，您的消息已保存，请稍后重试。'
+        messages.value[aiMsgIndex].isError = true
         sending.value = false
-        ElMessage.info('已自动切换为普通模式重试...')
-        streamMode.value = false
-        _sendNormal(content, images)
+        _abortStream = null
+        streamingContent.value = ''
       }
     )
   }

@@ -5,6 +5,8 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import logging
 
+from backend.config import settings
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +58,9 @@ class DBConnectionManager:
             sql: The SQL string to execute
             params: Dictionary of parameters for the SQL query
         """
+        if not settings.ENABLE_DB_QUERY:
+            return "Error: 无法访问数据库或者数据库查询开关未配置 (ENABLE_DB_QUERY 未开启)"
+
         if db_type not in self.engines:
             return f"Error: Database engine for '{db_type}' is not configured or failed to initialize."
         

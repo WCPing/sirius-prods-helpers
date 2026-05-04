@@ -7,7 +7,7 @@
 
     <!-- 消息气泡 -->
     <div class="bubble-wrapper">
-      <div class="bubble" :class="isUser ? 'bubble--user' : 'bubble--ai'">
+      <div class="bubble" :class="[isUser ? 'bubble--user' : 'bubble--ai', message.isError ? 'bubble--error' : '']">
         <!-- 流式光标 -->
         <span v-if="isStreaming && !isUser" class="streaming-cursor" />
 
@@ -45,6 +45,7 @@
         >
           复制
         </el-button>
+        <span v-if="formattedTime" class="msg-time">{{ formattedTime }}</span>
       </div>
     </div>
 
@@ -118,6 +119,22 @@ const props = defineProps({
 
 const isUser = computed(() => props.message.role === 'user')
 const markdownEl = ref(null)
+
+// 格式化消息时间：今天显示 HH:mm，其他显示 MM-DD HH:mm
+const formattedTime = computed(() => {
+  const ts = props.message.timestamp
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  const now = new Date()
+  const isToday =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return isToday ? hm : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`
+})
 
 // 将 Markdown 渲染为 HTML（仅 AI 消息）
 const renderedContent = computed(() => {
@@ -239,6 +256,12 @@ async function copyContent() {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
+.bubble--error {
+  border-color: #f56c6c;
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
 .bubble--user {
   background: linear-gradient(135deg, #409eff 0%, #337ecc 100%);
   color: #fff;
@@ -297,16 +320,24 @@ async function copyContent() {
 .bubble-footer {
   margin-top: 4px;
   min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .footer--left {
-  display: flex;
   justify-content: flex-start;
 }
 
 .footer--right {
-  display: flex;
   justify-content: flex-end;
+}
+
+.msg-time {
+  font-size: 11px;
+  color: #b0b3b8;
+  line-height: 1;
+  user-select: none;
 }
 
 .copy-btn {

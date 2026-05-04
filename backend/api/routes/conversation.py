@@ -319,10 +319,13 @@ def get_session_history(session_id: str):
 
         messages = []
         for msg in session.messages:
+            ts = None
+            if getattr(msg, "additional_kwargs", None):
+                ts = msg.additional_kwargs.get("timestamp")
             if isinstance(msg, HumanMessage):
-                messages.append(MessageItem(role="user", content=str(msg.content)))
+                messages.append(MessageItem(role="user", content=str(msg.content), timestamp=ts))
             elif isinstance(msg, AIMessage):
-                messages.append(MessageItem(role="assistant", content=str(msg.content)))
+                messages.append(MessageItem(role="assistant", content=str(msg.content), timestamp=ts))
             # 跳过 SystemMessage
 
         return SessionHistoryResponse(

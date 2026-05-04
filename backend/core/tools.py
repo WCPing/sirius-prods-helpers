@@ -148,6 +148,11 @@ class ExecuteSQLTool(BaseTool):
         Runs the SQL query.
         """
         import pandas as pd
+
+        if not settings.ENABLE_DB_QUERY:
+            logger.warning("ENABLE_DB_QUERY 未开启，已拦截 SQL 执行请求")
+            return "无法访问数据库或者数据库查询开关未配置"
+
         logger.info(f"Executing {db_type} SQL: {sql}")
         
         results = db_manager.execute_query(db_type, sql)

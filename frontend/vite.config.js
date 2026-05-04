@@ -19,6 +19,7 @@ export default defineConfig({
       '/api/conversations': {
         target: 'http://127.0.0.1:5174',
         changeOrigin: true,
+        timeout: 300000, // 与 Axios 超时保持一致：300s
         // 关键：为 SSE 连接配置 http-proxy，避免响应被缓冲
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes) => {
@@ -33,6 +34,7 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:5174',
         changeOrigin: true,
+        timeout: 300000, // 与 Axios 超时保持一致：300s
         rewrite: (path) => path
       }
     }

@@ -61,7 +61,9 @@ export function sendMessage(sessionId, message, images) {
   if (images && images.length > 0) {
     body.images = images
   }
-  return request.post(`/conversations/${sessionId}/messages`, body)
+  return request.post(`/conversations/${sessionId}/messages`, body, {
+    skipGlobalError: true
+  })
 }
 
 /**
@@ -117,6 +119,10 @@ export function sendMessageStream(sessionId, message, images, onChunk, onDone, o
               }
               try {
                 const parsed = JSON.parse(data)
+                if (parsed.error) {
+                  onError?.(new Error(parsed.error))
+                  return
+                }
                 onChunk?.(parsed.content || parsed.delta || data)
               } catch {
                 onChunk?.(data)

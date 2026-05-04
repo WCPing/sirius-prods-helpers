@@ -7,7 +7,7 @@ import { ElMessage } from 'element-plus'
 
 const request = axios.create({
   baseURL: '/api',
-  timeout: 120000, // AI 响应可能较慢，设置 120s
+  timeout: 300000, // AI 响应可能较慢，设置 300s（5分钟）
   headers: {
     'Content-Type': 'application/json'
   }
@@ -29,12 +29,15 @@ request.interceptors.response.use(
     return response.data
   },
   (error) => {
-    const msg =
-      error.response?.data?.detail ||
-      error.response?.data?.message ||
-      error.message ||
-      '请求失败'
-    ElMessage.error(msg)
+    // 标记了 skipGlobalError 的请求不弹全局错误提示（由调用方自行处理）
+    if (!error.config?.skipGlobalError) {
+      const msg =
+        error.response?.data?.detail ||
+        error.response?.data?.message ||
+        error.message ||
+        '请求失败'
+      ElMessage.error(msg)
+    }
     return Promise.reject(error)
   }
 )
