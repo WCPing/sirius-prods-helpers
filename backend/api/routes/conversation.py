@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
-from backend.api.models.request import CreateSessionRequest, SendMessageRequest
+from backend.api.models.request import CreateSessionRequest, SendMessageRequest, RenameSessionRequest
 from backend.api.models.response import (
     ListSessionsResponse,
     SessionDetailResponse,
@@ -42,29 +42,122 @@ router = APIRouter(prefix="/conversations", tags=["会话管理"])
 
 _agent_executor = None
 _conv_manager = None
+_summary_llm = None
 
 
-def _build_message_with_ocr(body) -> str:
+DEFAULT_SESSION_NAME = "新的聊天"
+
+
+def _get_summary_llm():
+    """获取或初始化用于生成会话标题的轻量 LLM（单例，无工具）"""
+    global _summary_llm
+    if _summary_llm is None:
+        from langchain_deepseek import ChatDeepSeek
+        from langchain_anthropic import ChatAnthropic
+
+        provider = settings.LLM_PROVIDER
+        if provider == "claude":
+            if not settings.ANTHROPIC_AUTH_TOKEN:
+                raise ValueError("ANTHROPIC_AUTH_TOKEN 未在 .env 中配置")
+            _summary_llm = ChatAnthropic(
+                model=settings.CLAUDE_MODEL,
+                anthropic_api_key=settings.ANTHROPIC_AUTH_TOKEN,
+                anthropic_api_url=settings.ANTHROPIC_BASE_URL or None,
+                max_tokens=64,
+                timeout=30,
+            )
+        else:
+            _summary_llm = ChatDeepSeek(
+                model="deepseek-chat",
+                temperature=0.3,
+                max_tokens=64,
+                timeout=settings.LLM_TIMEOUT,
+                max_retries=2,
+            )
+    return _summary_llm
+
+
+def _generate_session_title(user_msg: str, ai_reply: str) -> str | None:
+    """根据首轮对话生成简短的中文会话标题，失败返回 None。"""
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        # 截断过长内容以控制 token
+        user_snippet = (user_msg or "").strip()[:500]
+        ai_snippet = (ai_reply or "").strip()[:500]
+
+        llm = _get_summary_llm()
+        resp = llm.invoke([
+            SystemMessage(
+                content=(
+                    "请根据用户问题和AI回复，生成一个极简的中文会话标题，"
+                    "长度严格控制在 10 个汉字以内（不超过 10 字），"
+                    "只输出标题文本，不要加引号、标点或额外说明。"
+                )
+            ),
+            HumanMessage(
+                content=f"【用户问题】\n{user_snippet}\n\n【AI回复】\n{ai_snippet}"
+            ),
+        ])
+
+        raw = resp.content if hasattr(resp, "content") else str(resp)
+        if isinstance(raw, list):
+            text = ""
+            for block in raw:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text += block.get("text", "")
+                elif isinstance(block, str):
+                    text += block
+        else:
+            text = str(raw)
+
+        # 清洗：去除空白/引号/换行
+        title = text.strip().strip('"').strip("'").strip("「").strip("」").strip("《").strip("》")
+        title = title.splitlines()[0] if title else ""
+        title = title.strip()
+        if not title:
+            return None
+        # 限长 10 字
+        if len(title) > 10:
+            title = title[:10]
+        return title
+    except Exception as e:
+        logger.warning(f"_generate_session_title 失败: {e}")
+        return None
+
+
+def _build_message_with_attachments(body) -> str:
     """
-    处理请求体，如果包含图片则进行 OCR 识别并拼接到消息中。
+    处理请求体中的附件内容，将图片 OCR 和日志文本统一拼接到消息中。
     返回最终要发送给 LLM 的纯文本消息。
     """
     message = body.message or ""
-    if not body.images:
-        return message
+    parts = [message] if message else []
 
-    from backend.core.ocr_service import process_images
+    if body.images:
+        from backend.core.ocr_service import process_images
 
-    images_data = [img.model_dump() for img in body.images]
-    ocr_text = process_images(images_data)
+        images_data = [img.model_dump() for img in body.images]
+        ocr_text = process_images(images_data)
+        if ocr_text:
+            parts.append(f"---\n[附件图片OCR识别结果]\n{ocr_text}")
 
-    if not ocr_text:
-        return message or "请分析以下图片内容"
+    if body.log_file:
+        from backend.core.log_file_service import process_log_file
 
-    if not message:
-        message = "请分析以下图片内容"
+        log_file_data = body.log_file.model_dump()
+        log_text = process_log_file(log_file_data)
+        if log_text:
+            filename = body.log_file.filename or "log.txt"
+            parts.append(f"---\n[附件日志: {filename}]\n```\n{log_text}\n```")
 
-    return f"{message}\n\n---\n[附件图片OCR识别结果]\n{ocr_text}"
+    if not parts and (body.images or body.log_file):
+        parts.append("请分析以下附件内容")
+
+    elif (body.images or body.log_file) and not message:
+        parts.insert(0, "请分析以下附件内容")
+
+    return "\n\n".join(parts)
 
 
 def _get_conv_manager():
@@ -120,7 +213,6 @@ def _get_agent():
                 model=settings.CLAUDE_MODEL,
                 anthropic_api_key=settings.ANTHROPIC_AUTH_TOKEN,
                 anthropic_api_url=settings.ANTHROPIC_BASE_URL or None,
-                temperature=0.1,
                 max_tokens=2000,
                 timeout=settings.LLM_TIMEOUT,
             )
@@ -268,6 +360,47 @@ def create_session(body: CreateSessionRequest):
 
 
 # ---------------------------------------------------------------
+# 重命名会话
+# ---------------------------------------------------------------
+
+@router.patch(
+    "/{session_id}",
+    response_model=SessionDetailResponse,
+    summary="重命名会话",
+    description="修改指定会话的名称。",
+)
+def rename_session(session_id: str, body: RenameSessionRequest):
+    try:
+        conv_manager = _get_conv_manager()
+        session = conv_manager.sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"会话 '{session_id}' 不存在")
+
+        new_name = body.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="会话名称不能为空")
+
+        ok = conv_manager.rename_session(session_id, new_name)
+        if not ok:
+            raise HTTPException(status_code=500, detail="重命名失败")
+
+        info = SessionInfo(
+            session_id=session.session_id,
+            name=session.name,
+            message_count=session.message_count(),
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            is_current=session_id == conv_manager.current_session_id,
+        )
+        return SessionDetailResponse(success=True, message="会话已重命名", data=info)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"rename_session error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------
 # 获取会话详情
 # ---------------------------------------------------------------
 
@@ -363,8 +496,8 @@ def send_message(session_id: str, body: SendMessageRequest):
         # 切换到目标会话
         conv_manager.switch_session(session_id)
 
-        # 处理图片 OCR（如有）
-        final_message = _build_message_with_ocr(body)
+        # 处理附件内容（图片 OCR / 日志文本）
+        final_message = _build_message_with_attachments(body)
         if not final_message.strip():
             raise HTTPException(status_code=400, detail="消息内容不能为空")
 
@@ -386,10 +519,31 @@ def send_message(session_id: str, body: SendMessageRequest):
             )
 
         ai_msg = response["messages"][-1]
-        assistant_content = str(ai_msg.content)
+
+        # Claude 启用思考模式或工具调用时，content 可能是 blocks 列表
+        # 需要提取其中的 text 块作为最终回复（丢弃 thinking 块）
+        raw_content = ai_msg.content
+        if isinstance(raw_content, str):
+            assistant_content = raw_content
+        elif isinstance(raw_content, list):
+            text_parts = []
+            for block in raw_content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            assistant_content = "".join(text_parts)
+        else:
+            assistant_content = str(raw_content)
 
         # 保存 AI 回复
         conv_manager.add_ai_message(AIMessage(content=assistant_content))
+
+        # 若会话名仍为默认值，且为首轮回复（消息数==2），则自动总结标题
+        if session.message_count() == 2 and session.name == DEFAULT_SESSION_NAME:
+            new_title = _generate_session_title(final_message, assistant_content)
+            if new_title:
+                conv_manager.rename_session(session_id, new_title)
 
         return ChatResponse(
             success=True,
@@ -422,8 +576,8 @@ async def send_message_stream(session_id: str, body: SendMessageRequest):
     # 切换到目标会话
     conv_manager.switch_session(session_id)
 
-    # 处理图片 OCR（如有）
-    final_message = _build_message_with_ocr(body)
+    # 处理附件内容（图片 OCR / 日志文本）
+    final_message = _build_message_with_attachments(body)
     if not final_message.strip():
         raise HTTPException(status_code=400, detail="消息内容不能为空")
 
@@ -471,6 +625,15 @@ async def send_message_stream(session_id: str, body: SendMessageRequest):
             # 保存完整 AI 回复
             if full_content:
                 conv_manager.add_ai_message(AIMessage(content=full_content))
+                # 若会话名仍为默认值，且为首轮回复（消息数==2），则自动总结标题
+                try:
+                    cur = conv_manager.sessions.get(session_id)
+                    if cur and cur.message_count() == 2 and cur.name == DEFAULT_SESSION_NAME:
+                        new_title = _generate_session_title(final_message, full_content)
+                        if new_title:
+                            conv_manager.rename_session(session_id, new_title)
+                except Exception as e:
+                    logger.warning(f"[Stream] 自动总结标题失败: {e}")
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(

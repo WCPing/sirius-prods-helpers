@@ -9,7 +9,7 @@
           </el-tooltip>
         </div>
         <div class="toolbar-right">
-          <span class="hint-text">Enter 发送 &middot; Shift+Enter 换行 &middot; 可粘贴图片</span>
+          <span class="hint-text">Enter 发送 &middot; Shift+Enter 换行 &middot; 可粘贴图片或上传日志</span>
         </div>
       </div>
 
@@ -27,9 +27,19 @@
         <div
           v-if="imageList.length < maxImages"
           class="preview-add"
-          @click="triggerUpload"
+          @click="triggerImageUpload"
         >
           <el-icon><Plus /></el-icon>
+        </div>
+      </div>
+
+      <!-- 日志文件预览条 -->
+      <div v-if="logFile" class="file-preview-bar">
+        <div class="preview-item preview-item--file">
+          <el-icon class="preview-file-icon"><Document /></el-icon>
+          <span class="preview-name">{{ logFile.filename }}</span>
+          <span class="preview-meta">{{ formatFileSize(logFile.size) }}</span>
+          <el-icon class="preview-remove" @click="removeLogFile"><Close /></el-icon>
         </div>
       </div>
 
@@ -41,16 +51,33 @@
             :icon="PictureFilled"
             link
             class="upload-btn"
-            @click="triggerUpload"
+            @click="triggerImageUpload"
           />
         </el-tooltip>
         <input
-          ref="fileInputRef"
+          ref="imageInputRef"
           type="file"
           accept="image/png,image/jpg,image/jpeg,image/gif,image/bmp,image/webp"
           multiple
           style="display: none"
-          @change="onFileChange"
+          @change="onImageChange"
+        />
+
+        <!-- 上传日志按钮 -->
+        <el-tooltip content="上传日志文件" placement="top">
+          <el-button
+            :icon="Document"
+            link
+            class="upload-btn"
+            @click="triggerLogUpload"
+          />
+        </el-tooltip>
+        <input
+          ref="logInputRef"
+          type="file"
+          accept=".log,.txt,text/plain"
+          style="display: none"
+          @change="onLogChange"
         />
 
         <el-input
@@ -85,7 +112,7 @@
             type="primary"
             :icon="sending ? Loading : Promotion"
             :loading="sending"
-            :disabled="disabled || (!inputText.trim() && imageList.length === 0)"
+            :disabled="disabled || (!inputText.trim() && imageList.length === 0 && !logFile)"
             round
             @click="onSend"
           >
@@ -99,11 +126,13 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-import { Promotion, VideoPause, Loading, PictureFilled, Close, Plus } from '@element-plus/icons-vue'
+import { Promotion, VideoPause, Loading, PictureFilled, Document, Close, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
-const ALLOWED_TYPES = ['image/png', 'image/jpg', 'image/jpeg', 'image/gif', 'image/bmp', 'image/webp']
+const MAX_LOG_SIZE = 5 * 1024 * 1024 // 5MB
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpg', 'image/jpeg', 'image/gif', 'image/bmp', 'image/webp']
+const ALLOWED_LOG_EXTENSIONS = ['.log', '.txt']
 
 const props = defineProps({
   disabled: {
@@ -123,19 +152,30 @@ const props = defineProps({
 const emit = defineEmits(['send', 'abort'])
 
 const inputRef = ref(null)
-const fileInputRef = ref(null)
+const imageInputRef = ref(null)
+const logInputRef = ref(null)
 const inputText = ref('')
 const imageList = ref([]) // [{data, preview, filename, mime_type}]
+const logFile = ref(null) // {data, filename, mime_type, size}
 const maxImages = 5
 
-function triggerUpload() {
-  fileInputRef.value?.click()
+function triggerImageUpload() {
+  imageInputRef.value?.click()
 }
 
-function onFileChange(e) {
+function triggerLogUpload() {
+  logInputRef.value?.click()
+}
+
+function onImageChange(e) {
   const files = Array.from(e.target.files || [])
-  addFiles(files)
-  // reset input so same file can be selected again
+  addImages(files)
+  e.target.value = ''
+}
+
+function onLogChange(e) {
+  const [file] = Array.from(e.target.files || [])
+  if (file) addLogFile(file)
   e.target.value = ''
 }
 
@@ -153,17 +193,17 @@ function onPaste(e) {
 
   if (imageFiles.length > 0) {
     e.preventDefault()
-    addFiles(imageFiles)
+    addImages(imageFiles)
   }
 }
 
-function addFiles(files) {
+function addImages(files) {
   for (const file of files) {
     if (imageList.value.length >= maxImages) {
       ElMessage.warning(`最多上传 ${maxImages} 张图片`)
       break
     }
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
       ElMessage.warning(`不支持的图片格式: ${file.name}`)
       continue
     }
@@ -174,7 +214,7 @@ function addFiles(files) {
 
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const dataUrl = ev.target.result // data:image/png;base64,...
+      const dataUrl = ev.target.result
       const base64 = dataUrl.split(',')[1]
       imageList.value.push({
         data: base64,
@@ -187,8 +227,51 @@ function addFiles(files) {
   }
 }
 
+function addLogFile(file) {
+  if (logFile.value) {
+    ElMessage.warning('每次只能上传 1 个日志文件')
+    return
+  }
+
+  const lowerName = file.name.toLowerCase()
+  const isAllowed = ALLOWED_LOG_EXTENSIONS.some((ext) => lowerName.endsWith(ext))
+  if (!isAllowed) {
+    ElMessage.warning(`不支持的日志格式: ${file.name}`)
+    return
+  }
+
+  if (file.size > MAX_LOG_SIZE) {
+    ElMessage.warning(`日志文件 ${file.name} 过大（最大 5MB）`)
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    const dataUrl = ev.target.result
+    const base64 = dataUrl.split(',')[1]
+    logFile.value = {
+      data: base64,
+      filename: file.name,
+      mime_type: file.type || 'text/plain',
+      size: file.size,
+    }
+  }
+  reader.readAsDataURL(file)
+}
+
 function removeImage(idx) {
   imageList.value.splice(idx, 1)
+}
+
+function removeLogFile() {
+  logFile.value = null
+}
+
+function formatFileSize(size) {
+  if (!size) return '0 B'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function onKeyDown(e) {
@@ -201,15 +284,18 @@ function onKeyDown(e) {
 async function onSend() {
   const text = inputText.value.trim()
   const hasImages = imageList.value.length > 0
-  if ((!text && !hasImages) || props.disabled || props.sending) return
+  const hasLogFile = !!logFile.value
+  if ((!text && !hasImages && !hasLogFile) || props.disabled || props.sending) return
 
   const payload = {
     text,
     images: hasImages ? [...imageList.value] : null,
+    logFile: hasLogFile ? { ...logFile.value } : null,
   }
 
   inputText.value = ''
   imageList.value = []
+  logFile.value = null
 
   emit('send', payload)
 
@@ -259,8 +345,9 @@ async function onSend() {
   color: #c0c4cc;
 }
 
-/* ---- 图片预览条 ---- */
-.image-preview-bar {
+/* ---- 附件预览条 ---- */
+.image-preview-bar,
+.file-preview-bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -280,6 +367,10 @@ async function onSend() {
   flex-shrink: 0;
 }
 
+.preview-item--file {
+  gap: 6px;
+}
+
 .preview-thumb {
   width: 36px;
   height: 36px;
@@ -287,13 +378,23 @@ async function onSend() {
   border-radius: 4px;
 }
 
+.preview-file-icon {
+  font-size: 16px;
+  color: #606266;
+}
+
 .preview-name {
   font-size: 12px;
   color: #606266;
-  max-width: 80px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.preview-meta {
+  font-size: 12px;
+  color: #909399;
 }
 
 .preview-remove {

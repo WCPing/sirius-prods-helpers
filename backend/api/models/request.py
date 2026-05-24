@@ -59,6 +59,11 @@ class CreateSessionRequest(BaseModel):
     }
 
 
+class RenameSessionRequest(BaseModel):
+    """重命名会话请求体"""
+    name: str = Field(..., min_length=1, max_length=50, description="新的会话名称")
+
+
 class ImageData(BaseModel):
     """上传图片数据"""
     data: str = Field(..., description="base64 编码的图片数据")
@@ -66,10 +71,18 @@ class ImageData(BaseModel):
     mime_type: str = Field(default="image/png", description="MIME 类型")
 
 
+class LogFileData(BaseModel):
+    """上传日志/文本文件数据"""
+    data: str = Field(..., description="base64 编码的文件内容")
+    filename: str = Field(default="", description="文件名")
+    mime_type: str = Field(default="text/plain", description="MIME 类型")
+
+
 class SendMessageRequest(BaseModel):
     """向会话发送消息（AI 对话）请求体"""
     message: str = Field(default="", description="用户发送的消息内容")
     images: Optional[List[ImageData]] = Field(default=None, description="附件图片列表")
+    log_file: Optional[LogFileData] = Field(default=None, description="附件日志文件")
 
     model_config = {
         "json_schema_extra": {

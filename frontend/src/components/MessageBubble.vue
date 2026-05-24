@@ -29,6 +29,11 @@
               @click="previewImage(idx)"
             />
           </div>
+          <div v-if="message.logFile" class="user-file-chip">
+            <el-icon><Document /></el-icon>
+            <span>{{ message.logFile.filename }}</span>
+            <span v-if="message.logFile.size" class="user-file-size">{{ formatFileSize(message.logFile.size) }}</span>
+          </div>
           {{ message.content }}
         </div>
       </div>
@@ -68,7 +73,7 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { Cpu, User, CopyDocument } from '@element-plus/icons-vue'
+import { Cpu, User, CopyDocument, Document } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { ElImageViewer } from 'element-plus'
 import { marked } from 'marked'
@@ -175,6 +180,13 @@ const viewerUrls = computed(() => {
 function previewImage(idx) {
   viewerIndex.value = idx
   showViewer.value = true
+}
+
+function formatFileSize(size) {
+  if (!size) return ''
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 async function copyContent() {
@@ -291,6 +303,22 @@ async function copyContent() {
 }
 
 .user-image-thumb:hover {
+  opacity: 0.85;
+}
+
+.user-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: 12px;
+}
+
+.user-file-size {
   opacity: 0.85;
 }
 

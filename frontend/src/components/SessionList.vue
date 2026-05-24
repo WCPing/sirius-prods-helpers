@@ -67,31 +67,6 @@
       </div>
     </div>
 
-    <!-- 新建会话弹窗 -->
-    <el-dialog
-      v-model="showNewDialog"
-      title="新建会话"
-      width="360px"
-      :close-on-click-modal="false"
-      @open="newSessionName = ''"
-    >
-      <el-input
-        v-model="newSessionName"
-        placeholder="会话名称（可留空）"
-        maxlength="50"
-        show-word-limit
-        clearable
-        autofocus
-        @keyup.enter="confirmNewSession"
-      />
-      <template #footer>
-        <el-button @click="showNewDialog = false">取消</el-button>
-        <el-button type="primary" @click="confirmNewSession" :loading="creating">
-          创建
-        </el-button>
-      </template>
-    </el-dialog>
-
     <!-- 重命名弹窗 -->
     <el-dialog
       v-model="showRenameDialog"
@@ -125,19 +100,13 @@ import { useConversationStore } from '@/stores/conversation'
 const store = useConversationStore()
 
 // ---- 新建会话 ----
-const showNewDialog = ref(false)
-const newSessionName = ref('')
 const creating = ref(false)
 
-function onNewSession() {
-  showNewDialog.value = true
-}
-
-async function confirmNewSession() {
+async function onNewSession() {
+  if (creating.value) return
   creating.value = true
   try {
-    await store.createNewSession(newSessionName.value.trim())
-    showNewDialog.value = false
+    await store.createNewSession('')
     ElMessage.success('会话已创建')
   } finally {
     creating.value = false
@@ -165,18 +134,20 @@ function onAction(cmd, sessionId) {
   }
 }
 
-function confirmRename() {
-  if (!renameValue.value.trim()) {
+async function confirmRename() {
+  const name = renameValue.value.trim()
+  if (!name) {
     ElMessage.warning('名称不能为空')
     return
   }
-  // 本地更新（后端暂未提供重命名接口，直接更新本地状态）
-  const idx = store.sessions.findIndex((s) => s.session_id === renamingSessionId)
-  if (idx !== -1) {
-    store.sessions[idx].name = renameValue.value.trim()
-    ElMessage.success('已重命名')
+  if (!renamingSessionId) {
+    showRenameDialog.value = false
+    return
   }
-  showRenameDialog.value = false
+  const ok = await store.renameSessionApi(renamingSessionId, name)
+  if (ok) {
+    showRenameDialog.value = false
+  }
 }
 
 // ---- 时间格式化 ----

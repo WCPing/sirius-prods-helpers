@@ -8,9 +8,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listSessions,
   createSession,
+  getSession,
   getSessionHistory,
   sendMessage,
   sendMessageStream,
+  renameSession,
   clearSessionHistory,
   deleteSession
 } from '@/api/conversation'
@@ -133,7 +135,7 @@ export const useConversationStore = defineStore('conversation', () => {
 
   /**
    * 发送消息（根据 streamMode 自动选择普通/流式）
-   * @param {string|{text: string, images: Array}} payload - 纯文本或 {text, images} 结构
+   * @param {string|{text: string, images: Array, logFile: Object|null}} payload - 纯文本或结构化消息
    */
   async function sendUserMessage(payload) {
     if (!currentSessionId.value) {
@@ -146,45 +148,51 @@ export const useConversationStore = defineStore('conversation', () => {
     }
 
     // 统一解构 payload
-    let text, images
+    let text, images, logFile
     if (typeof payload === 'string') {
       text = payload
       images = null
+      logFile = null
     } else {
       text = payload.text || ''
       images = payload.images || null
+      logFile = payload.logFile || null
     }
 
-    const displayContent = text || '请分析以下图片内容'
+    const displayContent = text || '请分析以下附件内容'
 
-    // 先把用户消息追加到本地（带图片预览信息）
+    // 先把用户消息追加到本地（带附件预览信息）
     const userMsg = {
       role: 'user',
       content: displayContent,
       id: `user-${Date.now()}`,
       timestamp: Date.now(),
       images: images ? images.map((img) => ({ preview: img.preview, filename: img.filename })) : null,
+      logFile: logFile ? { filename: logFile.filename, size: logFile.size } : null,
     }
     messages.value.push(userMsg)
 
-    // 准备发送给 API 的图片数据（不含 preview）
+    // 准备发送给 API 的附件数据（不含 preview / size）
     const apiImages = images
       ? images.map(({ data, filename, mime_type }) => ({ data, filename, mime_type }))
+      : null
+    const apiLogFile = logFile
+      ? (({ data, filename, mime_type }) => ({ data, filename, mime_type }))(logFile)
       : null
 
     sending.value = true
 
     if (streamMode.value) {
-      await _sendStream(text, apiImages)
+      await _sendStream(text, apiImages, apiLogFile)
     } else {
-      await _sendNormal(text, apiImages)
+      await _sendNormal(text, apiImages, apiLogFile)
     }
   }
 
   /** 普通（非流式）发送 */
-  async function _sendNormal(content, images) {
+  async function _sendNormal(content, images, logFile) {
     try {
-      const res = await sendMessage(currentSessionId.value, content, images)
+      const res = await sendMessage(currentSessionId.value, content, images, logFile)
       const aiMsg = {
         role: 'assistant',
         content: res.reply || '',
@@ -209,7 +217,7 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   /** 流式发送 */
-  async function _sendStream(content, images) {
+  async function _sendStream(content, images, logFile) {
     const aiMsgId = `ai-stream-${Date.now()}`
     const aiMsg = { role: 'assistant', content: '', id: aiMsgId, timestamp: Date.now() }
     messages.value.push(aiMsg)
@@ -221,6 +229,7 @@ export const useConversationStore = defineStore('conversation', () => {
       currentSessionId.value,
       content,
       images,
+      logFile,
       // onChunk
       (chunk) => {
         streamingContent.value += chunk
@@ -247,19 +256,51 @@ export const useConversationStore = defineStore('conversation', () => {
 
   /**
    * 刷新当前会话在列表中的信息
+   * 优先从后端拉取（可获取自动生成的标题），失败再降级为本地更新
    */
   async function _refreshCurrentSessionInList() {
     if (!currentSessionId.value) return
+    const idx = sessions.value.findIndex(
+      (s) => s.session_id === currentSessionId.value
+    )
+    if (idx === -1) return
     try {
-      const idx = sessions.value.findIndex(
-        (s) => s.session_id === currentSessionId.value
-      )
-      if (idx !== -1) {
-        sessions.value[idx].message_count = messages.value.length
-        sessions.value[idx].updated_at = new Date().toISOString()
+      const res = await getSession(currentSessionId.value)
+      if (res?.data) {
+        sessions.value[idx] = {
+          ...sessions.value[idx],
+          ...res.data,
+        }
+        return
       }
     } catch (e) {
-      // 忽略
+      // 落到本地更新
+    }
+    sessions.value[idx].message_count = messages.value.length
+    sessions.value[idx].updated_at = new Date().toISOString()
+  }
+
+  /**
+   * 重命名会话（持久化到后端）
+   * @param {string} sessionId
+   * @param {string} name
+   */
+  async function renameSessionApi(sessionId, name) {
+    try {
+      const res = await renameSession(sessionId, name)
+      const idx = sessions.value.findIndex((s) => s.session_id === sessionId)
+      if (idx !== -1 && res?.data) {
+        sessions.value[idx] = {
+          ...sessions.value[idx],
+          ...res.data,
+        }
+      }
+      ElMessage.success('已重命名')
+      return true
+    } catch (e) {
+      console.error('renameSessionApi error:', e)
+      ElMessage.error(e?.message || '重命名失败')
+      return false
     }
   }
 
@@ -352,6 +393,7 @@ export const useConversationStore = defineStore('conversation', () => {
     switchSession,
     fetchHistory,
     sendUserMessage,
+    renameSessionApi,
     clearHistory,
     removeSession,
     abortStream,

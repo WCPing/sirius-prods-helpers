@@ -54,12 +54,16 @@ export function getSessionHistory(sessionId) {
  * @param {string} sessionId
  * @param {string} message - 用户消息内容
  * @param {Array} [images] - 图片列表 [{data, filename, mime_type}]
+ * @param {Object|null} [logFile] - 日志文件 {data, filename, mime_type}
  * @returns {Promise<ChatResponse>}
  */
-export function sendMessage(sessionId, message, images) {
+export function sendMessage(sessionId, message, images, logFile) {
   const body = { message }
   if (images && images.length > 0) {
     body.images = images
+  }
+  if (logFile) {
+    body.log_file = logFile
   }
   return request.post(`/conversations/${sessionId}/messages`, body, {
     skipGlobalError: true
@@ -72,17 +76,21 @@ export function sendMessage(sessionId, message, images) {
  * @param {string} sessionId
  * @param {string} message
  * @param {Array} [images] - 图片列表 [{data, filename, mime_type}]
+ * @param {Object|null} [logFile] - 日志文件 {data, filename, mime_type}
  * @param {function} onChunk - 每次收到 chunk 时的回调 (chunk: string) => void
  * @param {function} onDone  - 流结束时的回调 () => void
  * @param {function} onError - 错误时的回调 (error: Error) => void
  * @returns {() => void} abort 函数，用于提前终止流
  */
-export function sendMessageStream(sessionId, message, images, onChunk, onDone, onError) {
+export function sendMessageStream(sessionId, message, images, logFile, onChunk, onDone, onError) {
   const controller = new AbortController()
 
   const body = { message }
   if (images && images.length > 0) {
     body.images = images
+  }
+  if (logFile) {
+    body.log_file = logFile
   }
 
   fetch(`/api/conversations/${sessionId}/messages/stream`, {
@@ -142,6 +150,16 @@ export function sendMessageStream(sessionId, message, images, onChunk, onDone, o
 
   // 返回终止函数
   return () => controller.abort()
+}
+
+/**
+ * 重命名会话
+ * @param {string} sessionId
+ * @param {string} name
+ * @returns {Promise<SessionDetailResponse>}
+ */
+export function renameSession(sessionId, name) {
+  return request.patch(`/conversations/${sessionId}`, { name })
 }
 
 /**

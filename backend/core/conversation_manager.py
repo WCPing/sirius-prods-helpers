@@ -44,7 +44,7 @@ class ConversationSession:
             max_messages: 保留的最大消息数（超出后自动裁剪最早的消息）
         """
         self.session_id = session_id
-        self.name = name or f"会话 {session_id[:8]}"
+        self.name = name or "新的聊天"
         self.max_messages = max_messages
         self.messages: List[BaseMessage] = []
         self.created_at: str = datetime.now().isoformat()
@@ -171,7 +171,7 @@ class ConversationManager:
         session_id = str(uuid.uuid4())
         session = ConversationSession(
             session_id=session_id,
-            name=name or f"会话 {len(self.sessions) + 1}",
+            name=name or "新的聊天",
             max_messages=self.max_messages_per_session,
         )
         self.sessions[session_id] = session
@@ -194,6 +194,17 @@ class ConversationManager:
         if self.current_session_id not in self.sessions:
             return self.new_session()
         return self.sessions[self.current_session_id]
+
+    def rename_session(self, session_id: str, name: str) -> bool:
+        """重命名指定会话。成功返回 True，会话不存在返回 False。"""
+        session = self.sessions.get(session_id)
+        if not session:
+            return False
+        session.name = name
+        session.updated_at = datetime.now().isoformat()
+        self._save()
+        logger.info(f"会话 {session_id[:8]} 已重命名为: {name}")
+        return True
 
     def delete_session(self, session_id: str) -> bool:
         """删除指定会话。若删除的是当前会话，自动切换到其他会话。"""

@@ -68,7 +68,6 @@ def create_llm():
             model=model,
             anthropic_api_key=auth_token,
             anthropic_api_url=base_url,
-            temperature=0.1,
             max_tokens=2000,
         )
     else:
